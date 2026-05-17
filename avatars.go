@@ -278,7 +278,7 @@ func avatarHandler(c *gin.Context) {
 		return
 	}
 	c.Header("Content-Type", contentType)
-	c.Header("Cache-Control", "public, max-age=86400, must-revalidate")
+	c.Header("Cache-Control", "public, max-age=0, must-revalidate")
 	c.Header("ETag", etagQuoted)
 	c.Data(http.StatusOK, contentType, imageData)
 }
@@ -286,19 +286,24 @@ func avatarHandler(c *gin.Context) {
 func overlayHandler(c *gin.Context) {
 	username, _ := strings.CutSuffix(strings.ToLower(c.Param("username")), ".gif")
 
-	user, err := getAccountByUsername(Username(username))
+	_, err := getAccountByUsername(Username(username))
 	if err != nil {
 		sendEmpty(c)
 		return
 	}
 
-	overlayName := user.GetString("sys.overlay")
-	if overlayName == "" {
+	uc, err := loadUserCosmetics(username)
+	if err != nil {
+		sendEmpty(c)
+		return
+	}
+	overlayName, ok := uc.ActiveCosmetics[CosmeticTypeOverlay]
+	if !ok || overlayName == "" {
 		sendEmpty(c)
 		return
 	}
 
-	path := filepath.Join("./overlays", overlayName+".gif")
+	path := filepath.Join(COSMETICS_ASSETS_PATH, "overlays", overlayName+".gif")
 	if !fileExists(path) {
 		sendEmpty(c)
 		return
@@ -441,7 +446,7 @@ func getBannerPath(username string) (string, string, string, time.Time, error) {
 			case ".png":
 				ct = "image/png"
 			}
-			return fp, ct, fmt.Sprintf("%s-%d", username, time.Now().Unix()), fi.ModTime(), nil
+			return fp, ct, fmt.Sprintf("%s-%d", username, fi.ModTime().Unix()), fi.ModTime(), nil
 		}
 	}
 	return "", "", "", time.Time{}, os.ErrNotExist

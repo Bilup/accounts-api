@@ -16,52 +16,55 @@ import (
 type TokenPermission string
 
 const (
-	PermDeleteAccount    TokenPermission = "account:delete"
-	PermManageProfile    TokenPermission = "account:profile"
-	PermManageSettings   TokenPermission = "account:settings"
-	PermViewProfile      TokenPermission = "account:view"
-	PermViewCredits      TokenPermission = "credits:view"
-	PermManageCredits    TokenPermission = "credits:manage"
-	PermTransferCredits  TokenPermission = "credits:transfer"
-	PermClaimDaily       TokenPermission = "credits:daily"
-	PermViewFriends      TokenPermission = "friends:view"
-	PermManageFriends    TokenPermission = "friends:manage"
-	PermSendFriendReq    TokenPermission = "friends:request"
-	PermAcceptFriend     TokenPermission = "friends:accept"
-	PermRemoveFriend     TokenPermission = "friends:remove"
-	PermViewPosts        TokenPermission = "posts:view"
-	PermCreatePost       TokenPermission = "posts:create"
-	PermDeletePost       TokenPermission = "posts:delete"
-	PermManagePosts      TokenPermission = "posts:manage"
-	PermLikePost         TokenPermission = "posts:like"
-	PermReplyPost        TokenPermission = "posts:reply"
-	PermRepost           TokenPermission = "posts:repost"
-	PermViewFollowing    TokenPermission = "following:view"
-	PermFollow           TokenPermission = "following:follow"
-	PermUnfollow         TokenPermission = "following:unfollow"
-	PermViewFiles        TokenPermission = "files:view"
-	PermManageFiles      TokenPermission = "files:manage"
-	PermDeleteFiles      TokenPermission = "files:delete"
-	PermViewKeys         TokenPermission = "keys:view"
-	PermManageKeys       TokenPermission = "keys:manage"
-	PermViewGroups       TokenPermission = "groups:view"
-	PermManageGroups     TokenPermission = "groups:manage"
-	PermJoinGroup        TokenPermission = "groups:join"
-	PermLeaveGroup       TokenPermission = "groups:leave"
+	PermDeleteAccount     TokenPermission = "account:delete"
+	PermManageProfile     TokenPermission = "account:profile"
+	PermManageSettings    TokenPermission = "account:settings"
+	PermViewProfile       TokenPermission = "account:view"
+	PermViewCredits       TokenPermission = "credits:view"
+	PermManageCredits     TokenPermission = "credits:manage"
+	PermTransferCredits   TokenPermission = "credits:transfer"
+	PermClaimDaily        TokenPermission = "credits:daily"
+	PermViewFriends       TokenPermission = "friends:view"
+	PermManageFriends     TokenPermission = "friends:manage"
+	PermSendFriendReq     TokenPermission = "friends:request"
+	PermAcceptFriend      TokenPermission = "friends:accept"
+	PermRemoveFriend      TokenPermission = "friends:remove"
+	PermViewPosts         TokenPermission = "posts:view"
+	PermCreatePost        TokenPermission = "posts:create"
+	PermDeletePost        TokenPermission = "posts:delete"
+	PermManagePosts       TokenPermission = "posts:manage"
+	PermLikePost          TokenPermission = "posts:like"
+	PermReplyPost         TokenPermission = "posts:reply"
+	PermRepost            TokenPermission = "posts:repost"
+	PermViewFollowing     TokenPermission = "following:view"
+	PermFollow            TokenPermission = "following:follow"
+	PermUnfollow          TokenPermission = "following:unfollow"
+	PermViewFiles         TokenPermission = "files:view"
+	PermManageFiles       TokenPermission = "files:manage"
+	PermDeleteFiles       TokenPermission = "files:delete"
+	PermViewKeys          TokenPermission = "keys:view"
+	PermManageKeys        TokenPermission = "keys:manage"
+	PermViewGroups        TokenPermission = "groups:view"
+	PermManageGroups      TokenPermission = "groups:manage"
+	PermJoinGroup         TokenPermission = "groups:join"
+	PermLeaveGroup        TokenPermission = "groups:leave"
 	PermViewNotifications TokenPermission = "notifications:view"
 	PermSendNotifications TokenPermission = "notifications:send"
-	PermViewGifts        TokenPermission = "gifts:view"
-	PermCreateGift       TokenPermission = "gifts:create"
-	PermClaimGift        TokenPermission = "gifts:claim"
-	PermCancelGift       TokenPermission = "gifts:cancel"
-	PermViewItems        TokenPermission = "items:view"
-	PermBuyItems         TokenPermission = "items:buy"
-	PermSellItems        TokenPermission = "items:sell"
-	PermManageItems      TokenPermission = "items:manage"
+	PermViewGifts         TokenPermission = "gifts:view"
+	PermCreateGift        TokenPermission = "gifts:create"
+	PermClaimGift         TokenPermission = "gifts:claim"
+	PermCancelGift        TokenPermission = "gifts:cancel"
+	PermViewItems         TokenPermission = "items:view"
+	PermBuyItems          TokenPermission = "items:buy"
+	PermSellItems         TokenPermission = "items:sell"
+	PermManageItems       TokenPermission = "items:manage"
 	PermGenerateValidator TokenPermission = "validators:generate"
-	PermViewBlocked      TokenPermission = "blocked:view"
-	PermManageBlocked    TokenPermission = "blocked:manage"
-	PermManageTokens     TokenPermission = "tokens:manage"
+	PermViewBlocked       TokenPermission = "blocked:view"
+	PermManageBlocked     TokenPermission = "blocked:manage"
+	PermManageTokens      TokenPermission = "tokens:manage"
+	PermViewCosmetics     TokenPermission = "cosmetics:view"
+	PermBuyCosmetics      TokenPermission = "cosmetics:buy"
+	PermEquipCosmetics    TokenPermission = "cosmetics:equip"
 )
 
 func AllPermissions() []TokenPermission {
@@ -112,6 +115,9 @@ func AllPermissions() []TokenPermission {
 		PermViewBlocked,
 		PermManageBlocked,
 		PermManageTokens,
+		PermViewCosmetics,
+		PermBuyCosmetics,
+		PermEquipCosmetics,
 	}
 }
 
@@ -130,7 +136,7 @@ func PermissionGroups() []PermissionGroup {
 				PermViewProfile, PermViewCredits, PermViewFriends,
 				PermViewPosts, PermViewFollowing, PermViewFiles,
 				PermViewKeys, PermViewGroups, PermViewNotifications,
-				PermViewGifts, PermViewItems, PermViewBlocked,
+				PermViewGifts, PermViewItems, PermViewCosmetics, PermViewBlocked,
 			},
 		},
 		{
@@ -153,6 +159,7 @@ func PermissionGroups() []PermissionGroup {
 				PermTransferCredits, PermClaimDaily,
 				PermViewGifts, PermCreateGift, PermClaimGift, PermCancelGift,
 				PermViewItems, PermBuyItems, PermSellItems, PermManageItems,
+				PermViewCosmetics, PermBuyCosmetics, PermEquipCosmetics,
 			},
 		},
 		{
@@ -375,7 +382,7 @@ type SubTokenCreate struct {
 }
 
 var (
-	subTokenIndex     = make(map[string]*subTokenEntry)
+	subTokenIndex      = make(map[string]*subTokenEntry)
 	subTokenIndexMutex sync.RWMutex
 )
 

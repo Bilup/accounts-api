@@ -6,8 +6,8 @@ import (
 	"log"
 	"math"
 	"os"
-	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -178,51 +178,12 @@ func saveCosmeticsCatalog() {
 	saveJsonFile(COSMETICS_FILE_PATH, cosmeticsCatalog)
 }
 
-func getCosmeticsFilePath(username string) string {
-	return filepath.Join(USERDATA_PATH, strings.ToLower(username), "cosmetics.json")
-}
-
 func loadUserCosmetics(username string) (*UserCosmetics, error) {
-	path := getCosmeticsFilePath(username)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &UserCosmetics{
-				ActiveCosmetics: map[CosmeticType]string{},
-				OwnedCosmetics:  []string{},
-			}, nil
-		}
-		return nil, err
-	}
-
-	var uc UserCosmetics
-	if err := json.Unmarshal(data, &uc); err != nil {
-		return nil, err
-	}
-
-	if uc.ActiveCosmetics == nil {
-		uc.ActiveCosmetics = map[CosmeticType]string{}
-	}
-	if uc.OwnedCosmetics == nil {
-		uc.OwnedCosmetics = []string{}
-	}
-
-	return &uc, nil
+    return LoadUserCosmetics(username)
 }
 
 func saveUserCosmetics(username string, uc *UserCosmetics) error {
-	path := getCosmeticsFilePath(username)
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create cosmetics directory: %w", err)
-	}
-
-	data, err := json.MarshalIndent(uc, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal cosmetics: %w", err)
-	}
-
-	return atomicWrite(path, data, 0644)
+    return SaveUserCosmetics(username, uc)
 }
 
 func getCatalogEntryById(id string) (*CosmeticCatalogEntry, bool) {
@@ -435,11 +396,9 @@ func purchaseCosmetic(c *gin.Context) {
 		return
 	}
 
-	for _, owned := range uc.OwnedCosmetics {
-		if owned == id {
-			c.JSON(400, gin.H{"error": "You already own this cosmetic"})
-			return
-		}
+	if slices.Contains(uc.OwnedCosmetics, id) {
+		c.JSON(400, gin.H{"error": "You already own this cosmetic"})
+		return
 	}
 
 	if len(uc.OwnedCosmetics) >= maxOwnedCosmeticsPerUser {
