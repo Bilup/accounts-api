@@ -1147,7 +1147,6 @@ func (u User) Set(key string, value any) {
 		return
 	}
 	u[key] = value
-	valueCopy := deepCopyValue(value)
 
 	var uid UserId
 	if v, ok := u["sys.id"]; ok && v != nil {
@@ -1155,16 +1154,9 @@ func (u User) Set(key string, value any) {
 			uid = UserId(str)
 		}
 	}
-	var username Username
-	if v, ok := u["username"]; ok {
-		if str, ok := v.(string); ok {
-			username = Username(str)
-		}
-	}
 	mu.Unlock()
 
 	if key != "key" && key != "password" {
-		go broadcastUserUpdate(username, key, valueCopy)
 		if uid != "" {
 			go OnUserUpdate(uid, key, value)
 		}
