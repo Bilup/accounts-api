@@ -8,69 +8,67 @@ import (
 )
 
 func authenticateWithKey(key string) *User {
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-
-	for _, user := range users {
+	idToUserMutex.RLock()
+	idx, ok := keyToUserIdx[key]
+	idToUserMutex.RUnlock()
+	if ok {
+		usersMutex.RLock()
+		user := users[idx]
+		usersMutex.RUnlock()
 		if user.GetKey() == key {
 			return &user
+		}
+	}
+
+	usersMutex.RLock()
+	defer usersMutex.RUnlock()
+	for i := range users {
+		if users[i].GetKey() == key {
+			return &users[i]
 		}
 	}
 	return nil
 }
 
 func doesUserOwnKey(userId UserId, key string) bool {
-	keyOwnershipCacheMutex.Lock()
-	defer keyOwnershipCacheMutex.Unlock()
-
 	keysMutex.RLock()
-	defer keysMutex.RUnlock()
-
-	for _, userKey := range keys {
-		if userKey.Key == key {
-			if _, exists := userKey.Users[userId]; exists {
-				return true
-			}
-			break
-		}
+	idx, ok := keyStringToIdx[key]
+	if !ok {
+		keysMutex.RUnlock()
+		return false
 	}
+	userKey := keys[idx]
+	keysMutex.RUnlock()
 
-	return false
+	_, exists := userKey.Users[userId]
+	return exists
 }
 
 func getKeyNextBilling(userId UserId, key string) int64 {
-	keyOwnershipCacheMutex.Lock()
-	defer keyOwnershipCacheMutex.Unlock()
-
-	var success bool = keysMutex.TryRLock()
-	if success {
-		defer keysMutex.RUnlock()
+	keysMutex.RLock()
+	defer keysMutex.RUnlock()
+	idx, ok := keyStringToIdx[key]
+	if !ok {
+		return 0
 	}
-
-	for _, userKey := range keys {
-		if userKey.Key == key {
-			if _, exists := userKey.Users[userId]; exists {
-				nextBilling := userKey.Users[userId].NextBilling
-				if nextBilling == nil {
-					return 0
-				}
-				switch v := nextBilling.(type) {
-				case float64:
-					return int64(v)
-				case int64:
-					return v
-				case int:
-					return int64(v)
-				default:
-					return 0
-				}
-			}
-			break
-		}
+	userData, exists := keys[idx].Users[userId]
+	if !exists {
+		return 0
 	}
-
-	// If the key doesn't exist, return 0 to indicate that the user doesn't have a subscription
-	return 0
+	nextBilling := userData.NextBilling
+	if nextBilling == nil {
+		return 0
+	}
+	switch v := nextBilling.(type) {
+	case float64:
+		return int64(v)
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	default:
+		return 0
+	}
 }
 
 func isAdmin(c *gin.Context) bool {

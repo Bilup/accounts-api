@@ -240,6 +240,9 @@ func deletePost(c *gin.Context) {
 		return
 	}
 
+	isMist := user.GetUsername().ToLower() == "mist"
+	userId := user.GetId()
+
 	postsMutex.Lock()
 	var postToDelete *Post
 	newPosts := make([]Post, 0)
@@ -248,7 +251,7 @@ func deletePost(c *gin.Context) {
 		if posts[i].ID == postID {
 			postToDelete = &posts[i]
 			// Check if the user can delete this post
-			if user.GetUsername().ToLower() != "mist" && user.GetId() != posts[i].User {
+			if !isMist && userId != posts[i].User {
 				postsMutex.Unlock()
 				c.JSON(403, ErrorResponse{Error: "You cannot delete this post"})
 				return

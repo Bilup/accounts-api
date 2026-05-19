@@ -84,36 +84,50 @@ func handleUserGoogle(c *gin.Context) {
 		return
 	}
 
-	usersMutex.Lock()
+	var matchedUser User
+	var matchedIdx int = -1
+	var emailConflict bool
+	usersMutex.RLock()
 	for i := range users {
 		if v, ok := users[i]["sys.google"]; ok {
 			if m, ok := v.(map[string]any); ok {
 				if sub, ok := m["sub"]; ok {
 					if strings.EqualFold(strings.TrimSpace(fmt.Sprintf("%v", sub)), googleSub) {
-						now := time.Now().UnixMilli()
-						users[i].Set("sys.last_login", now)
-						users[i].Set("sys.total_logins", users[i].GetInt("sys.total_logins")+1)
-						users[i].Set("sys.badges", calculateUserBadges(users[i]))
-						users[i].SetSubscription(users[i].GetSubscription())
-						go saveUsers()
-
-						userCopy := copyUser(users[i])
-						delete(userCopy, "password")
-						usersMutex.Unlock()
-						c.JSON(200, userCopy)
-						return
+						matchedUser = users[i]
+						matchedIdx = i
+						break
 					}
 				}
 			}
 		}
-
-		if strings.EqualFold(users[i].GetEmail(), email) {
-			usersMutex.Unlock()
-			c.JSON(403, gin.H{"error": "Account not linked to Google"})
-			return
+		if matchedIdx == -1 {
+			em, _ := users[i]["email"].(string)
+			if strings.EqualFold(em, email) {
+				emailConflict = true
+				break
+			}
 		}
 	}
-	usersMutex.Unlock()
+	usersMutex.RUnlock()
+
+	if matchedIdx != -1 {
+		now := time.Now().UnixMilli()
+		matchedUser.Set("sys.last_login", now)
+		matchedUser.Set("sys.total_logins", matchedUser.GetInt("sys.total_logins")+1)
+		matchedUser.Set("sys.badges", calculateUserBadges(matchedUser))
+		matchedUser.SetSubscription(matchedUser.GetSubscription())
+		go saveUsers()
+
+		userCopy := copyUser(matchedUser)
+		delete(userCopy, "password")
+		c.JSON(200, userCopy)
+		return
+	}
+
+	if emailConflict {
+		c.JSON(403, gin.H{"error": "Account not linked to Google"})
+		return
+	}
 
 	isValid, errorMessage, matchedSystem := validateSystem(req.System)
 	if !isValid {

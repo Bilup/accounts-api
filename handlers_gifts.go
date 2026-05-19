@@ -145,9 +145,7 @@ func claimGift(c *gin.Context) {
 		return
 	}
 
-	giftsMutex.Lock()
-	defer giftsMutex.Unlock()
-
+	giftsMutex.RLock()
 	giftIdx := -1
 	for i := range gifts {
 		if gifts[i].Code == code {
@@ -155,15 +153,17 @@ func claimGift(c *gin.Context) {
 			break
 		}
 	}
-
 	if giftIdx == -1 {
+		giftsMutex.RUnlock()
 		c.JSON(404, gin.H{"error": "Gift not found"})
 		return
 	}
 
-	gift := &gifts[giftIdx]
+	gift := gifts[giftIdx]
+	giftsMutex.RUnlock()
 
-	if gift.CreatorId == user.GetId() {
+	userId := user.GetId()
+	if gift.CreatorId == userId {
 		c.JSON(400, gin.H{"error": "You cannot claim your own gift"})
 		return
 	}
@@ -188,7 +188,7 @@ func claimGift(c *gin.Context) {
 	user.SetBalance(newBal)
 
 	now := time.Now().UnixMilli()
-	claimedBy := user.GetId()
+	claimedBy := userId
 
 	user.addTransaction(Transaction{
 		Note:      gift.Note,
@@ -205,7 +205,7 @@ func claimGift(c *gin.Context) {
 	if len(creator) > 0 {
 		creator.addTransaction(Transaction{
 			Note:      "Gift claimed by " + string(user.GetUsername()),
-			User:      user.GetId(),
+			User:      userId,
 			Amount:    gift.Amount,
 			Type:      "gift_claimed",
 			Timestamp: now,
@@ -215,8 +215,10 @@ func claimGift(c *gin.Context) {
 		})
 	}
 
-	gift.ClaimedAt = &now
-	gift.ClaimedBy = &claimedBy
+	giftsMutex.Lock()
+	gifts[giftIdx].ClaimedAt = &now
+	gifts[giftIdx].ClaimedBy = &claimedBy
+	giftsMutex.Unlock()
 
 	go saveGifts()
 	go saveUsers()
@@ -227,7 +229,6 @@ func claimGift(c *gin.Context) {
 		"new_balance": newBal,
 	})
 }
-
 func cancelGift(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 
@@ -237,9 +238,7 @@ func cancelGift(c *gin.Context) {
 		return
 	}
 
-	giftsMutex.Lock()
-	defer giftsMutex.Unlock()
-
+	giftsMutex.RLock()
 	giftIdx := -1
 	for i := range gifts {
 		if gifts[i].Id == giftId {
@@ -247,15 +246,17 @@ func cancelGift(c *gin.Context) {
 			break
 		}
 	}
-
 	if giftIdx == -1 {
+		giftsMutex.RUnlock()
 		c.JSON(404, gin.H{"error": "Gift not found"})
 		return
 	}
 
-	gift := &gifts[giftIdx]
+	gift := gifts[giftIdx]
+	giftsMutex.RUnlock()
 
-	if gift.CreatorId != user.GetId() {
+	userId := user.GetId()
+	if gift.CreatorId != userId {
 		c.JSON(403, gin.H{"error": "You can only cancel your own gifts"})
 		return
 	}
@@ -280,7 +281,6 @@ func cancelGift(c *gin.Context) {
 	user.SetBalance(newBal)
 
 	now := time.Now().UnixMilli()
-
 	user.addTransaction(Transaction{
 		Note:      "Gift cancelled: " + gift.Code,
 		User:      UserId(""),
@@ -292,7 +292,9 @@ func cancelGift(c *gin.Context) {
 		GiftCode:  gift.Code,
 	})
 
-	gift.CancelledAt = &now
+	giftsMutex.Lock()
+	gifts[giftIdx].CancelledAt = &now
+	giftsMutex.Unlock()
 
 	go saveGifts()
 	go saveUsers()
@@ -303,7 +305,6 @@ func cancelGift(c *gin.Context) {
 		"new_balance": newBal,
 	})
 }
-
 func getMyGifts(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 

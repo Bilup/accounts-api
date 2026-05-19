@@ -219,15 +219,16 @@ func getTokenStorePath(username string) string {
 }
 
 func loadTokenStore(username string) (*TokenStore, error) {
+	key := strings.ToLower(username)
 	tokenStoreMutex.RLock()
-	if cached, ok := tokenStoreCache[strings.ToLower(username)]; ok {
+	if cached, ok := tokenStoreCache[key]; ok {
 		tokenStoreMutex.RUnlock()
 		return cached, nil
 	}
 	tokenStoreMutex.RUnlock()
 
 	path := getTokenStorePath(username)
-	data, err := os.ReadFile(path)
+	fileData, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			store := &TokenStore{
@@ -235,7 +236,7 @@ func loadTokenStore(username string) (*TokenStore, error) {
 				UpdatedAt: time.Now().UnixMilli(),
 			}
 			tokenStoreMutex.Lock()
-			tokenStoreCache[strings.ToLower(username)] = store
+			tokenStoreCache[key] = store
 			tokenStoreMutex.Unlock()
 			return store, nil
 		}
@@ -243,12 +244,16 @@ func loadTokenStore(username string) (*TokenStore, error) {
 	}
 
 	var store TokenStore
-	if err := json.Unmarshal(data, &store); err != nil {
+	if err := json.Unmarshal(fileData, &store); err != nil {
 		return nil, fmt.Errorf("failed to parse token store: %w", err)
 	}
 
 	tokenStoreMutex.Lock()
-	tokenStoreCache[strings.ToLower(username)] = &store
+	if existing, ok := tokenStoreCache[key]; ok {
+		tokenStoreMutex.Unlock()
+		return existing, nil
+	}
+	tokenStoreCache[key] = &store
 	tokenStoreMutex.Unlock()
 
 	return &store, nil

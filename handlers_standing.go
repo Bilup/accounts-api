@@ -55,9 +55,7 @@ func setStandingAdmin(c *gin.Context) {
 
 	user.SetStanding(req.Level, req.Reason, UserId(adminId))
 
-	usersMutex.Lock()
-	saveUsers()
-	usersMutex.Unlock()
+	go saveUsers()
 
 	c.JSON(200, gin.H{
 		"success":  true,
@@ -174,9 +172,7 @@ func recoverStandingAdmin(c *gin.Context) {
 
 	user.SetStanding(newLevel, req.Reason, UserId(adminId))
 
-	usersMutex.Lock()
-	saveUsers()
-	usersMutex.Unlock()
+	go saveUsers()
 
 	c.JSON(200, gin.H{
 		"success":           true,
@@ -191,18 +187,20 @@ func startStandingRecoveryChecker() {
 		for {
 			time.Sleep(5 * time.Minute)
 
-			usersMutex.Lock()
-			updated := false
+			type recoveryEntry struct {
+				Index    int
+				NewLevel StandingLevel
+			}
+			var pending []recoveryEntry
 			now := time.Now().Unix()
 
+			usersMutex.RLock()
 			for i := range users {
 				user := &users[i]
 				recoverAt := user.GetStandingRecoverAt()
-
 				if recoverAt > 0 && recoverAt < now {
 					standing := user.GetStanding()
 					var newLevel StandingLevel
-
 					switch standing {
 					case StandingWarning:
 						newLevel = StandingGood
@@ -211,16 +209,17 @@ func startStandingRecoveryChecker() {
 					default:
 						continue
 					}
-
-					user.SetStanding(newLevel, "Automatic recovery", UserId("system"))
-					updated = true
+					pending = append(pending, recoveryEntry{Index: i, NewLevel: newLevel})
 				}
 			}
+			usersMutex.RUnlock()
 
-			if updated {
-				saveUsers()
+			if len(pending) > 0 {
+				for _, entry := range pending {
+					users[entry.Index].SetStanding(entry.NewLevel, "Automatic recovery", UserId("system"))
+				}
+				go saveUsers()
 			}
-			usersMutex.Unlock()
 		}
 	}()
 }

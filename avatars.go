@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -29,9 +30,45 @@ var (
 	defaultAvatarContent []byte
 	defaultAvatarEtag    string
 	defaultBannerContent []byte
+
+	userTierCache   map[string]string
+	userTierCacheMu sync.RWMutex
 )
 
 const defaultAvatarURL = "https://raw.githubusercontent.com/Mistium/Origin-OS/main/Resources/no-pfp.jpeg"
+
+func getUserTierCached(username string) (string, bool) {
+	username = strings.ToLower(username)
+	userTierCacheMu.RLock()
+	tier, ok := userTierCache[username]
+	userTierCacheMu.RUnlock()
+	if ok {
+		if tier == "" {
+			return "", false
+		}
+		return tier, true
+	}
+	user, err := getAccountByUsername(Username(username))
+	userTierCacheMu.Lock()
+	if userTierCache == nil {
+		userTierCache = make(map[string]string)
+	}
+	if err != nil {
+		userTierCache[username] = ""
+		userTierCacheMu.Unlock()
+		return "", false
+	}
+	tier = user.GetSubscription().Tier
+	userTierCache[username] = tier
+	userTierCacheMu.Unlock()
+	return tier, true
+}
+
+func InvalidateUserTierCache(username string) {
+	userTierCacheMu.Lock()
+	delete(userTierCache, strings.ToLower(username))
+	userTierCacheMu.Unlock()
+}
 
 func loadAvatarConfig() {
 	documentPath := os.Getenv("HOME")
@@ -103,11 +140,7 @@ func avatarHandler(c *gin.Context) {
 
 	filePath, contentType, baseEtag, metaErr := getAvatarMetadata(username)
 
-	user, userErr := getAccountByUsername(Username(username))
-	tier := "Free"
-	if userErr == nil {
-		tier = user.GetSubscription().Tier
-	}
+	tier, _ := getUserTierCached(username)
 	isPro := hasTierOrHigher(tier, "Drive")
 	forceFirstFrameJpeg := !isPro && metaErr == nil && contentType == "image/gif"
 	finalEtagBase := baseEtag
@@ -286,8 +319,7 @@ func avatarHandler(c *gin.Context) {
 func overlayHandler(c *gin.Context) {
 	username, _ := strings.CutSuffix(strings.ToLower(c.Param("username")), ".gif")
 
-	_, err := getAccountByUsername(Username(username))
-	if err != nil {
+	if _, exists := getUserTierCached(username); !exists {
 		sendEmpty(c)
 		return
 	}
@@ -470,11 +502,7 @@ func bannerHandler(c *gin.Context) {
 	radiusInt, parseErr := strconv.Atoi(strings.TrimSuffix(radiusStr, "px"))
 	needRounding := radiusStr != "" && parseErr == nil && radiusInt > 0
 
-	user, userErr := getAccountByUsername(Username(username))
-	tier := "Free"
-	if userErr == nil {
-		tier = user.GetSubscription().Tier
-	}
+	tier, _ := getUserTierCached(username)
 	isPro := hasTierOrHigher(tier, "Pro")
 
 	bannerPath, contentType, etag, modTime, err := getBannerPath(username)
@@ -502,11 +530,7 @@ func bannerHandler(c *gin.Context) {
 		if !modTime.IsZero() {
 			c.Header("Last-Modified", modTime.Format(http.TimeFormat))
 		}
-		if contentType == "image/gif" {
-			c.Header("Cache-Control", "public, max-age=86400, must-revalidate")
-		} else {
-			c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-		}
+		c.Header("Cache-Control", "public, max-age=0, must-revalidate")
 		if c.Request.Method == http.MethodHead {
 			c.Status(200)
 			return
@@ -595,7 +619,7 @@ func bannerHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error rounding image"})
 		return
 	}
-	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	c.Header("Cache-Control", "public, max-age=0, must-revalidate")
 	c.Data(http.StatusOK, newContentType, rounded)
 }
 

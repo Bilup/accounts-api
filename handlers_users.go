@@ -19,29 +19,51 @@ import (
 )
 
 func getAccountsBy(key string, value string, max int) ([]User, error) {
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-
 	var matches []User
-	if key == "username" {
+	switch key {
+	case "username":
 		valueLower := Username(value).ToLower()
-		for _, user := range users {
-			if user.GetUsername().ToLower() == valueLower {
+		idToUserMutex.RLock()
+		uid, ok := usernameToId[valueLower]
+		idToUserMutex.RUnlock()
+		if ok {
+			idToUserMutex.RLock()
+			user := idToUser[uid]
+			idToUserMutex.RUnlock()
+			if user != nil {
 				matches = append(matches, user)
 				if max != -1 && len(matches) >= max {
 					return matches, nil
 				}
 			}
 		}
-	} else {
+	case "key":
+		idToUserMutex.RLock()
+		idx, ok := keyToUserIdx[value]
+		idToUserMutex.RUnlock()
+		if ok {
+			usersMutex.RLock()
+			user := users[idx]
+			usersMutex.RUnlock()
+			if user.GetKey() == value {
+				matches = append(matches, user)
+				if max != -1 && len(matches) >= max {
+					return matches, nil
+				}
+			}
+		}
+	default:
+		usersMutex.RLock()
 		for _, user := range users {
 			if fmt.Sprintf("%v", user.Get(key)) == value {
 				matches = append(matches, user)
 				if max != -1 && len(matches) >= max {
+					usersMutex.RUnlock()
 					return matches, nil
 				}
 			}
 		}
+		usersMutex.RUnlock()
 	}
 
 	if len(matches) == 0 {
@@ -51,63 +73,71 @@ func getAccountsBy(key string, value string, max int) ([]User, error) {
 }
 
 func getAccountByUserId[T UserId | string](id T) (User, error) {
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-
-	name := UserId(id).User().GetUsername().ToLower()
-
-	for _, user := range users {
-		if user.GetUsername().ToLower() == name {
-			return user, nil
-		}
+	uid := UserId(id)
+	idToUserMutex.RLock()
+	user := idToUser[uid]
+	idToUserMutex.RUnlock()
+	if user != nil {
+		return user, nil
 	}
-
 	return nil, fmt.Errorf("account not found for id=%q", id)
 }
 
 func getAccountByUsername[T Username | string](username T) (User, error) {
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-
 	name := Username(username).ToLower()
-
-	for _, user := range users {
-		if user.GetUsername().ToLower() == name {
-			return user, nil
-		}
+	idToUserMutex.RLock()
+	uid, ok := usernameToId[name]
+	if !ok {
+		idToUserMutex.RUnlock()
+		return nil, fmt.Errorf("account not found for username=%q", username)
 	}
-
+	user := idToUser[uid]
+	idToUserMutex.RUnlock()
+	if user != nil {
+		return user, nil
+	}
 	return nil, fmt.Errorf("account not found for username=%q", username)
 }
 
 func findAccountByLogin(username string, password string) (User, error) {
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-
 	name := Username(username).ToLower()
-	for _, user := range users {
-		if user.GetUsername().ToLower() == name && user.GetPassword() == password {
-			return user, nil
-		}
+	idToUserMutex.RLock()
+	uid, ok := usernameToId[name]
+	idToUserMutex.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("account not found for login")
 	}
-
+	idToUserMutex.RLock()
+	user := idToUser[uid]
+	idToUserMutex.RUnlock()
+	if user != nil && user.GetPassword() == password {
+		return user, nil
+	}
 	return nil, fmt.Errorf("account not found for login")
 }
 
 func getIdxOfAccountBy(key string, value string) int {
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-
 	if key == "username" {
 		valueLower := Username(value).ToLower()
-		for i, user := range users {
-			if user.GetUsername().ToLower() == valueLower {
+		idToUserMutex.RLock()
+		uid, ok := usernameToId[valueLower]
+		idToUserMutex.RUnlock()
+		if !ok {
+			return -1
+		}
+		usersMutex.RLock()
+		for i := range users {
+			if users[i].GetId() == uid {
+				usersMutex.RUnlock()
 				return i
 			}
 		}
+		usersMutex.RUnlock()
 		return -1
 	}
 
+	usersMutex.RLock()
+	defer usersMutex.RUnlock()
 	for i, user := range users {
 		if user.Get(key) == value {
 			return i
@@ -122,8 +152,6 @@ func setAccountKey(username Username, key string, value any) error {
 	i := getIdxOfAccountBy("username", string(username))
 
 	if i != -1 {
-		usersMutex.Lock()
-		defer usersMutex.Unlock()
 
 		users[i].Set(key, value)
 		return nil
@@ -202,8 +230,6 @@ func getUser(c *gin.Context) {
 	}
 
 	if foundUser != nil {
-		usersMutex.Lock()
-		defer usersMutex.Unlock()
 
 		if foundUser.IsBanned() {
 			c.JSON(403, gin.H{
@@ -212,8 +238,18 @@ func getUser(c *gin.Context) {
 			})
 			return
 		}
+
+		if v, ok := foundUser["sys.email_verified"]; ok && v != true {
+			c.JSON(403, gin.H{
+				"error":              "Email address not verified",
+				"username":           foundUser.GetUsername(),
+				"token":              foundUser.GetKey(),
+				"sys.email_verified": false,
+			})
+			return
+		}
+
 		if foundUser.Get("sys.tos_accepted") != true {
-			// early return - TOS not accepted
 			c.JSON(403, gin.H{
 				"error":            "Terms-Of-Service are not accepted or outdated",
 				"username":         foundUser.GetUsername(),
@@ -245,7 +281,6 @@ func getUser(c *gin.Context) {
 		}
 
 		addLogin(c, foundUser, "Successful Login")
-		foundUser.SetSubscription(foundUser.GetSubscription())
 
 		go saveUsers()
 		c.JSON(200, userToNet(foundUser))
@@ -256,7 +291,17 @@ func getUser(c *gin.Context) {
 }
 
 func userToNet(user User) User {
-	userCopy := copyUser(user)
+	mu := getMutexForUser(user)
+	mu.Lock()
+	userCopy := make(User, len(user)+4)
+	for k, v := range user {
+		if k == "password" {
+			continue
+		}
+		userCopy[k] = v
+	}
+	mu.Unlock()
+
 	userCopy["sys.friends"] = user.GetFriendUsers()
 	userCopy["sys.requests"] = user.GetRequestedUsers()
 	userCopy["sys.blocked"] = user.GetBlockedUsers()
@@ -267,7 +312,6 @@ func userToNet(user User) User {
 	}
 	userCopy["sys.transactions"] = netTransactions
 
-	delete(userCopy, "password")
 	return userCopy
 }
 
@@ -278,15 +322,18 @@ func checkAuth(c *gin.Context) {
 		return
 	}
 
-	usersMutex.RLock()
-	for _, user := range users {
+	idToUserMutex.RLock()
+	idx, ok := keyToUserIdx[auth]
+	idToUserMutex.RUnlock()
+	if ok {
+		usersMutex.RLock()
+		user := users[idx]
+		usersMutex.RUnlock()
 		if user.GetKey() == auth {
-			usersMutex.RUnlock()
 			c.JSON(200, gin.H{"auth": true, "username": user.GetUsername(), "token_type": "main"})
 			return
 		}
 	}
-	usersMutex.RUnlock()
 
 	subUser, subToken, err := authenticateWithSubTokenFast(auth)
 	if err == nil && subUser != nil {
@@ -350,9 +397,6 @@ func refreshToken(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 
 	newToken := generateAccountToken()
-
-	usersMutex.Lock()
-	defer usersMutex.Unlock()
 
 	user.Set("key", newToken)
 	go saveUsers()
@@ -418,6 +462,15 @@ func registerUser(c *gin.Context) {
 		return
 	}
 
+	if email == "" || !isValidEmail(email) {
+		c.JSON(400, gin.H{"error": "A valid email address is required"})
+		return
+	}
+	if isDisposableEmail(email) {
+		c.JSON(400, gin.H{"error": "Disposable email addresses are not allowed"})
+		return
+	}
+
 	usernameLower := username.ToLower()
 	if ok, msg := ValidateUsername(username); !ok {
 		c.JSON(400, gin.H{"error": msg})
@@ -429,20 +482,33 @@ func registerUser(c *gin.Context) {
 		return
 	}
 
-	usersMutex.Lock()
+	usersMutex.RLock()
+	usernameExists := false
+	emailExists := false
 	for _, user := range users {
-		if user.GetUsername().ToLower() == usernameLower {
-			c.JSON(400, gin.H{"error": "Username already in use"})
-			usersMutex.Unlock()
-			return
+		mu := getMutexForUser(user)
+		mu.Lock()
+		uname, _ := user["username"].(string)
+		em, _ := user["email"].(string)
+		mu.Unlock()
+		if Username(uname).ToLower() == usernameLower {
+			usernameExists = true
+			break
 		}
-		if strings.EqualFold(user.GetEmail(), email) {
-			c.JSON(400, gin.H{"error": "Email already in use"})
-			usersMutex.Unlock()
-			return
+		if strings.EqualFold(em, email) {
+			emailExists = true
+			break
 		}
 	}
-	usersMutex.Unlock()
+	usersMutex.RUnlock()
+	if usernameExists {
+		c.JSON(400, gin.H{"error": "Username already in use"})
+		return
+	}
+	if emailExists {
+		c.JSON(400, gin.H{"error": "Email already in use"})
+		return
+	}
 
 	if ok, msg := ValidatePasswordHash(password); !ok {
 		c.JSON(400, gin.H{"error": msg})
@@ -477,6 +543,12 @@ func registerUser(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "Failed to create account"})
 		return
 	}
+	verifyToken := generateVerifyToken()
+	newUser.Set("sys.email_verify_token", verifyToken)
+	newUser.Set("sys.email_verify_sent", time.Now().UnixMilli())
+	go saveUsers()
+	go sendVerifyEmail(email, string(username), verifyToken)
+
 	userCopy := copyUser(newUser)
 	delete(userCopy, "password")
 	c.JSON(201, userCopy)
@@ -742,14 +814,28 @@ func updateUser(c *gin.Context) {
 
 	if key == "email" {
 		usersMutex.RLock()
-		for _, user := range users {
-			if strings.EqualFold(user.GetEmail(), stringValue) {
-				c.JSON(400, gin.H{"error": "Email already in use"})
-				usersMutex.RUnlock()
-				return
+		emailConflict := false
+		for _, u := range users {
+			mu := getMutexForUser(u)
+			mu.Lock()
+			em, _ := u["email"].(string)
+			mu.Unlock()
+			if strings.EqualFold(em, stringValue) {
+				emailConflict = true
+				break
 			}
 		}
 		usersMutex.RUnlock()
+		if emailConflict {
+			c.JSON(400, gin.H{"error": "Email already in use"})
+			return
+		}
+
+		user.Set("sys.email_verified", false)
+		verifyToken := generateVerifyToken()
+		user.Set("sys.email_verify_token", verifyToken)
+		user.Set("sys.email_verify_sent", time.Now().UnixMilli())
+		go sendVerifyEmail(stringValue, string(user.GetUsername()), verifyToken)
 	}
 
 	if key == "bio" {
@@ -918,9 +1004,7 @@ func updateUserAdmin(c *gin.Context) {
 				return
 			}
 
-			usersMutex.Lock()
 			users[userIndex].DelKey(key)
-			usersMutex.Unlock()
 
 			go saveUsers()
 
@@ -1279,22 +1363,21 @@ func removeUserDirectory(path string) error {
 }
 
 func reconnectFriends(_ any) {
-	usersMutex.Lock()
-	defer usersMutex.Unlock()
-
+	usersMutex.RLock()
 	friendMap := make(map[UserId][]UserId, len(users))
 	for i := range users {
 		u := users[i]
-		friends := u.GetFriends()
-
+		friends := getStringSlice(u, "sys.friends")
 		valid := make([]UserId, 0, len(friends))
 		for _, f := range friends {
-			if friendUser := f.User(); friendUser != nil {
-				valid = append(valid, f)
+			if friendUser := UserId(f).User(); friendUser != nil {
+				valid = append(valid, UserId(f))
 			}
 		}
-		friendMap[u.GetId()] = valid
+		uid, _ := u["sys.id"].(string)
+		friendMap[UserId(uid)] = valid
 	}
+	usersMutex.RUnlock()
 
 	for uId, friends := range friendMap {
 		for _, f := range friends {
@@ -1358,9 +1441,8 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 	go broadcastUserUpdate(usernameLower, "sys._deleted", true)
 
 	uId := usernameLower.Id()
-	usersMutex.Lock()
-	defer usersMutex.Unlock()
 
+	usersMutex.RLock()
 	for i := range users {
 		target := &users[i]
 
@@ -1391,6 +1473,7 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 			}
 		}
 	}
+	usersMutex.RUnlock()
 
 	go saveUsers()
 

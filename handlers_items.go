@@ -552,7 +552,8 @@ func adminAddUserToItem(c *gin.Context) {
 
 	user := c.MustGet("user").(*User)
 
-	if user.GetUsername().ToLower() != "mist" {
+	isMist := user.GetUsername().ToLower() == "mist"
+	if !isMist {
 		c.JSON(403, gin.H{"error": "Invalid authentication key"})
 		return
 	}

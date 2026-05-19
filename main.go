@@ -157,7 +157,6 @@ func main() {
 	auth := r.Group("/auth")
 	{
 		auth.POST("/rotur", rateLimit("register"), registerUser)
-		auth.POST("/google", rateLimit("profile"), handleUserGoogle)
 	}
 
 	me := r.Group("/me")
@@ -176,7 +175,10 @@ func main() {
 		me.POST("/note/:username", requiresAuth, requirePermission(PermManageProfile), requireTier("Plus"), noteUser)
 		me.DELETE("/note/:username", requiresAuth, requirePermission(PermManageProfile), requireTier("Plus"), deleteNote)
 		me.GET("/able", requiresAuth, getTokenAbilities)
+		me.POST("/resend_verification", requiresAuth, resendVerificationHandler)
 	}
+
+	r.GET("/verify_email", verifyEmailHandler)
 
 	groups := r.Group("/groups")
 	{

@@ -658,46 +658,56 @@ func saveGifts() {
 func cleanExpiredGifts() {
 	for {
 		time.Sleep(1 * time.Hour)
-
-		giftsMutex.Lock()
-		now := time.Now().UnixMilli()
-		changed := false
-
+		giftsMutex.RLock()
+		var expiredGifts []Gift
 		for i := range gifts {
 			gift := &gifts[i]
 			if gift.IsActive() && gift.IsExpired() {
-				creator := getUserById(gift.CreatorId)
-				if len(creator) > 0 {
-					newBal := roundVal(creator.GetCredits() + gift.Amount)
-					creator.SetBalance(newBal)
-					nowTs := now
-					creator.addTransaction(Transaction{
-						Note:      "Gift expired: " + gift.Code,
-						User:      UserId(""),
-						Amount:    gift.Amount,
-						Type:      "gift_refund",
-						Timestamp: nowTs,
-						NewTotal:  newBal,
-						GiftId:    gift.Id,
-						GiftCode:  gift.Code,
-					})
-				}
-
-				cancelledAt := now
-				gift.CancelledAt = &cancelledAt
-				changed = true
+				expiredGifts = append(expiredGifts, *gift)
 			}
 		}
+		giftsMutex.RUnlock()
 
-		giftsMutex.Unlock()
+		if len(expiredGifts) == 0 {
+			continue
+		}
+
+		changed := false
+		now := time.Now().UnixMilli()
+		for _, gift := range expiredGifts {
+			creator := getUserById(gift.CreatorId)
+			if len(creator) > 0 {
+				newBal := roundVal(creator.GetCredits() + gift.Amount)
+				creator.SetBalance(newBal)
+				creator.addTransaction(Transaction{
+					Note:      "Gift expired: " + gift.Code,
+					User:      UserId(""),
+					Amount:    gift.Amount,
+					Type:      "gift_refund",
+					Timestamp: now,
+					NewTotal:  newBal,
+					GiftId:    gift.Id,
+					GiftCode:  gift.Code,
+				})
+			}
+			changed = true
+		}
 
 		if changed {
+			giftsMutex.Lock()
+			for i := range gifts {
+				gift := &gifts[i]
+				if gift.IsActive() && gift.IsExpired() {
+					cancelledAt := now
+					gift.CancelledAt = &cancelledAt
+				}
+			}
+			giftsMutex.Unlock()
 			go saveGifts()
 			go saveUsers()
 		}
 	}
 }
-
 func generateGiftCode() string {
 	return generateShortToken() + generateShortToken()
 }

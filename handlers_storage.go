@@ -6,7 +6,9 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -49,15 +51,39 @@ func loadUsers() {
 
 	usernameToIdInner := make(map[Username]UserId, len(loaded))
 	idToUserInner := make(map[UserId]User, len(loaded))
-	for _, u := range loaded {
+	keyToUserIdxInner := make(map[string]int, len(loaded))
+	for i, u := range loaded {
 		id := u.GetId()
 		usernameToIdInner[u.GetUsername().ToLower()] = id
 		idToUserInner[id] = u
+		if key := u.GetKey(); key != "" {
+			keyToUserIdxInner[key] = i
+		}
 	}
 	fmt.Println("Loaded", len(loaded), "users")
+	// Pre-populate avatar tier cache
+	tierCache := make(map[string]string, len(loaded))
+	for _, u := range loaded {
+		tier := "Free"
+		if sub := u.Get("sys.subscription"); sub != nil {
+			if m, ok := sub.(map[string]any); ok {
+				if t, ok := m["tier"]; ok {
+					if s, ok := t.(string); ok && s != "" {
+						tier = s
+					}
+				}
+			}
+		}
+		tierCache[strings.ToLower(string(u.GetUsername()))] = tier
+	}
+	userTierCacheMu.Lock()
+	userTierCache = tierCache
+	userTierCacheMu.Unlock()
+
 	idToUserMutex.Lock()
 	usernameToId = usernameToIdInner
 	idToUser = idToUserInner
+	keyToUserIdx = keyToUserIdxInner
 	idToUserMutex.Unlock()
 	users = loaded
 }
@@ -170,12 +196,66 @@ func atomicWrite(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmp, path)
 }
 
-var usersSaveMutex sync.Mutex
+var (
+	usersSaveMutex sync.Mutex
+	usersDirty     int32
+	saveScheduled  int32
+)
+
+func MarkUsersDirty() {
+	atomic.StoreInt32(&usersDirty, 1)
+}
 
 func saveUsers() {
+	atomic.StoreInt32(&usersDirty, 1)
+
+	if !atomic.CompareAndSwapInt32(&saveScheduled, 0, 1) {
+		return
+	}
+
+	go func() {
+		for {
+			time.Sleep(100 * time.Millisecond)
+
+			usersSaveMutex.Lock()
+
+			usersMutex.RLock()
+			snapshot := make([]User, len(users))
+			for i := range users {
+				snapshot[i] = copyUser(users[i])
+			}
+			usersMutex.RUnlock()
+
+			atomic.StoreInt32(&usersDirty, 0)
+
+			data, err := json.Marshal(snapshot)
+			if err != nil {
+				log.Printf("Error marshaling users: %v", err)
+				usersSaveMutex.Unlock()
+				continue
+			}
+
+			if err := atomicWrite(USERS_FILE_PATH, data, 0644); err != nil {
+				log.Printf("Error saving users (atomic write failed): %v", err)
+			}
+
+			usersSaveMutex.Unlock()
+
+			if atomic.LoadInt32(&usersDirty) == 0 {
+				atomic.StoreInt32(&saveScheduled, 0)
+				if atomic.LoadInt32(&usersDirty) != 0 && atomic.CompareAndSwapInt32(&saveScheduled, 0, 1) {
+					continue
+				}
+				return
+			}
+		}
+	}()
+}
+
+func saveUsersSync() {
 	usersSaveMutex.Lock()
 	defer usersSaveMutex.Unlock()
-	// Take a deep snapshot under read lock to avoid concurrent map iteration during JSON marshal
+
 	usersMutex.RLock()
 	snapshot := make([]User, len(users))
 	for i := range users {
@@ -309,6 +389,14 @@ func loadFollowers() {
 
 	followersMutex.Lock()
 	followersData = validFollowersData
+	fcMap := make(map[UserId]int, len(validFollowersData))
+	for _, v := range validFollowersData {
+		for _, follower := range v.Followers {
+			fcMap[follower]++
+		}
+	}
+	followingCountMap = fcMap
+
 	followersMutex.Unlock()
 
 	log.Printf("Loaded %d followers", len(followersData))
@@ -404,13 +492,24 @@ func loadKeys() {
 		return
 	}
 
+	keyStringToIdxInner := make(map[string]int, len(keys))
+	for i, k := range keys {
+		keyStringToIdxInner[k.Key] = i
+	}
+	keyStringToIdx = keyStringToIdxInner
+
 	log.Printf("Loaded %d keys", len(keys))
 }
 
 func saveKeys() {
 	keysMutex.RLock()
-	defer keysMutex.RUnlock()
+	idx := make(map[string]int, len(keys))
+	for i, k := range keys {
+		idx[k.Key] = i
+	}
+	keyStringToIdx = idx
 	saveJsonFile(KEYS_FILE_PATH, keys)
+	keysMutex.RUnlock()
 }
 
 func loadSystems() {

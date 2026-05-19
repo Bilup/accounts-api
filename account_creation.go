@@ -34,17 +34,34 @@ func createAccount(in AccountCreateInput) (User, error) {
 		return nil, fmt.Errorf("system is required")
 	}
 
-	usersMutex.Lock()
-	defer usersMutex.Unlock()
-
+	usersMutex.RLock()
+	usernameExists := false
+	emailExists := false
 	for _, user := range users {
-		if user.GetUsername().ToLower() == usernameLower {
-			return nil, fmt.Errorf("username already in use")
+		mu := getMutexForUser(user)
+		mu.Lock()
+		uname, _ := user["username"].(string)
+		em, _ := user["email"].(string)
+		mu.Unlock()
+		if Username(uname).ToLower() == usernameLower {
+			usernameExists = true
+			break
 		}
-		if strings.EqualFold(user.GetEmail(), in.Email) {
-			return nil, fmt.Errorf("email already in use")
+		if strings.EqualFold(em, in.Email) {
+			emailExists = true
+			break
 		}
 	}
+	usersMutex.RUnlock()
+	if usernameExists {
+		return nil, fmt.Errorf("username already in use")
+	}
+	if emailExists {
+		return nil, fmt.Errorf("email already in use")
+	}
+
+	usersMutex.Lock()
+	defer usersMutex.Unlock()
 
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(in.RequestIP)))
 	provider := in.Provider
@@ -102,6 +119,8 @@ func createAccount(in AccountCreateInput) (User, error) {
 		"created":          time.Now().UnixMilli(),
 		"wallpaper":        in.System.Wallpaper,
 		"sys.tos_accepted": false,
+		"sys.email_verified": false,
+		"sys.email_verify_token": "",
 	}
 
 	if in.ExtraSys != nil {

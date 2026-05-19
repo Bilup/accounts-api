@@ -263,13 +263,7 @@ func getProfile(c *gin.Context) {
 		followerCount = len(data.Followers)
 	}
 
-	// Get following count
-	followingCount := 0
-	for _, data := range followersData {
-		if slices.Contains(data.Followers, userId) {
-			followingCount++
-		}
-	}
+	followingCount := followingCountMap[userId]
 	followersMutex.RUnlock()
 
 	// Initialize follow relationship info

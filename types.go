@@ -587,9 +587,12 @@ func (u User) GetBlocked() []UserId {
 
 func (u User) GetBlockedUsers() []Username {
 	blocked := u.GetBlocked()
-	out := make([]Username, 0)
+	out := make([]Username, 0, len(blocked))
 	for _, b := range blocked {
-		if user := getUserById(b); len(user) > 0 {
+		idToUserMutex.RLock()
+		user := idToUser[b]
+		idToUserMutex.RUnlock()
+		if user != nil {
 			if username := user.GetUsername(); username != "" {
 				out = append(out, username)
 			}
@@ -758,9 +761,12 @@ func (u User) GetFriends() []UserId {
 
 func (u User) GetFriendUsers() []Username {
 	friends := getStringSlice(u, "sys.friends")
-	out := make([]Username, 0)
+	out := make([]Username, 0, len(friends))
 	for _, f := range friends {
-		if user := getUserById(UserId(f)); len(user) > 0 {
+		idToUserMutex.RLock()
+		user := idToUser[UserId(f)]
+		idToUserMutex.RUnlock()
+		if user != nil {
 			if username := user.GetUsername(); username != "" {
 				out = append(out, username)
 			}
@@ -780,9 +786,12 @@ func (u User) GetRequests() []UserId {
 
 func (u User) GetRequestedUsers() []Username {
 	requests := getStringSlice(u, "sys.requests")
-	out := make([]Username, 0)
+	out := make([]Username, 0, len(requests))
 	for _, r := range requests {
-		if user := getUserById(UserId(r)); len(user) > 0 {
+		idToUserMutex.RLock()
+		user := idToUser[UserId(r)]
+		idToUserMutex.RUnlock()
+		if user != nil {
 			if username := user.GetUsername(); username != "" {
 				out = append(out, username)
 			}
@@ -1123,7 +1132,6 @@ func (u User) GetInt(key string) int {
 func (u User) DelKey(key string) error {
 	mu := getMutexForUser(u)
 	mu.Lock()
-	defer mu.Unlock()
 	var username Username
 	if v, ok := u["username"]; ok {
 		if str, ok := v.(string); ok {
@@ -1131,6 +1139,7 @@ func (u User) DelKey(key string) error {
 		}
 	}
 	delete(u, key)
+	mu.Unlock()
 	go notify("sys.delete", map[string]any{
 		"username": username,
 		"key":      key,
@@ -1142,10 +1151,6 @@ func (u User) Set(key string, value any) {
 	mu := getMutexForUser(u)
 	mu.Lock()
 	oldValue := u[key]
-	if reflect.DeepEqual(oldValue, value) {
-		mu.Unlock()
-		return
-	}
 	u[key] = value
 
 	var uid UserId
@@ -1154,7 +1159,40 @@ func (u User) Set(key string, value any) {
 			uid = UserId(str)
 		}
 	}
+
+	var keyUpdate struct {
+		oldKey, newKey string
+		uid            UserId
+	}
+	needKeyUpdate := false
+	if key == "key" {
+		keyUpdate.oldKey, _ = oldValue.(string)
+		keyUpdate.newKey, _ = value.(string)
+		keyUpdate.uid = uid
+		if keyUpdate.oldKey != keyUpdate.newKey {
+			needKeyUpdate = true
+		}
+	}
+
 	mu.Unlock()
+
+	if needKeyUpdate {
+		usersMutex.RLock()
+		idToUserMutex.Lock()
+		if keyUpdate.oldKey != "" {
+			delete(keyToUserIdx, keyUpdate.oldKey)
+		}
+		if keyUpdate.newKey != "" {
+			for i := range users {
+				if users[i].GetId() == keyUpdate.uid {
+					keyToUserIdx[keyUpdate.newKey] = i
+					break
+				}
+			}
+		}
+		idToUserMutex.Unlock()
+		usersMutex.RUnlock()
+	}
 
 	if key != "key" && key != "password" {
 		if uid != "" {
@@ -1856,14 +1894,16 @@ var (
 	users         []User
 	usernameToId  map[Username]UserId
 	idToUser      map[UserId]User
+	keyToUserIdx  map[string]int
 	idToUserMutex sync.RWMutex
 	usersMutex    sync.RWMutex
 
 	groupsData      map[string]*GroupData
 	groupsDataMutex sync.RWMutex
 
-	followersData  map[UserId]FollowerData
-	followersMutex sync.RWMutex
+	followersData     map[UserId]FollowerData
+	followingCountMap map[UserId]int
+	followersMutex    sync.RWMutex
 
 	posts      []Post
 	postsMutex sync.RWMutex
@@ -1871,8 +1911,9 @@ var (
 	items      []Item
 	itemsMutex sync.RWMutex
 
-	keys      []Key
-	keysMutex sync.RWMutex
+	keys           []Key
+	keyStringToIdx map[string]int
+	keysMutex      sync.RWMutex
 
 	systems      map[string]System
 	systemsMutex sync.RWMutex

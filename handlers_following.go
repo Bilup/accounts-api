@@ -8,7 +8,6 @@ import (
 
 func followUser(c *gin.Context) {
 	user := c.MustGet("user").(*User)
-
 	targetUsername := Username(c.Query("username"))
 	if targetUsername == "" {
 		targetUsername = Username(c.Query("name"))
@@ -19,7 +18,6 @@ func followUser(c *gin.Context) {
 	}
 	targetId := targetUsername.Id()
 	currentId := user.GetId()
-
 	targetUsername = targetUsername.ToLower()
 
 	// Check if the target user exists
@@ -27,6 +25,7 @@ func followUser(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "User not found"})
 		return
 	}
+
 	if isUserBlockedBy(targetId.User(), currentId) {
 		c.JSON(400, gin.H{"error": "You cant follow this user"})
 		return
@@ -38,8 +37,6 @@ func followUser(c *gin.Context) {
 	}
 
 	followersMutex.Lock()
-	defer followersMutex.Unlock()
-
 	// Ensure target user has an entry in followers data
 	if _, exists := followersData[targetId]; !exists {
 		followersData[targetId] = FollowerData{Followers: make([]UserId, 0)}
@@ -47,6 +44,7 @@ func followUser(c *gin.Context) {
 
 	// Check if already following
 	if slices.Contains(followersData[targetId].Followers, currentId) {
+		followersMutex.Unlock()
 		c.JSON(400, gin.H{"error": "You are already following " + targetUsername})
 		return
 	}
@@ -55,8 +53,8 @@ func followUser(c *gin.Context) {
 	data := followersData[targetId]
 	data.Followers = append(data.Followers, currentId)
 	followersData[targetId] = data
-
 	go saveFollowers()
+	followersMutex.Unlock()
 
 	addUserEvent(targetId, "follow", map[string]any{
 		"follower": string(currentId),
@@ -67,7 +65,6 @@ func followUser(c *gin.Context) {
 
 func unfollowUser(c *gin.Context) {
 	user := c.MustGet("user").(*User)
-
 	targetUsername := Username(c.Query("username"))
 	if targetUsername == "" {
 		targetUsername = Username(c.Query("name"))
@@ -82,18 +79,15 @@ func unfollowUser(c *gin.Context) {
 		return
 	}
 	currentId := user.GetId()
-
 	targetUsername = targetUsername.ToLower()
 
 	followersMutex.Lock()
-	defer followersMutex.Unlock()
-
 	data, exists := followersData[targetId]
 	if !exists || len(data.Followers) == 0 {
+		followersMutex.Unlock()
 		c.JSON(400, gin.H{"error": "You are not following this user"})
 		return
 	}
-
 	// Remove from followers list
 	newFollowers := make([]UserId, 0)
 	found := false
@@ -104,23 +98,25 @@ func unfollowUser(c *gin.Context) {
 			found = true
 		}
 	}
-
 	if !found {
+		followersMutex.Unlock()
 		c.JSON(400, gin.H{"error": "You are not following this user"})
 		return
 	}
-
 	data.Followers = newFollowers
 	followersData[targetId] = data
-
+	if followingCountMap[currentId] > 0 {
+		followingCountMap[currentId]--
+	}
 	go saveFollowers()
+	followersCount := len(data.Followers)
+	followersMutex.Unlock()
 
 	go broadcastClawEvent("followers", map[string]any{
 		"username":  targetUsername,
-		"followers": len(data.Followers),
+		"followers": followersCount,
 	})
 
-	// Remove follow notification from target user's events history
 	shouldSave := false
 	eventsHistoryMutex.Lock()
 	if userEvents, exists := eventsHistory[targetId]; exists {
