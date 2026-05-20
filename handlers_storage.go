@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -62,7 +61,7 @@ func loadUsers() {
 	}
 	fmt.Println("Loaded", len(loaded), "users")
 	// Pre-populate avatar tier cache
-	tierCache := make(map[string]string, len(loaded))
+	tierCache := make(map[Username]string, len(loaded))
 	for _, u := range loaded {
 		tier := "Free"
 		if sub := u.Get("sys.subscription"); sub != nil {
@@ -74,7 +73,7 @@ func loadUsers() {
 				}
 			}
 		}
-		tierCache[strings.ToLower(string(u.GetUsername()))] = tier
+		tierCache[u.GetUsername().ToLower()] = tier
 	}
 	userTierCacheMu.Lock()
 	userTierCache = tierCache

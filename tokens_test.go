@@ -150,8 +150,9 @@ func TestTokenStoreLoadSave(t *testing.T) {
 	USERDATA_PATH = tmpDir
 	defer func() { USERDATA_PATH = origPath }()
 
-	username := "testuser"
-	store, err := loadTokenStore(username)
+	username := Username("testuser")
+	userId := username.Id()
+	store, err := loadTokenStore(userId)
 	if err != nil {
 		t.Fatalf("Failed to load token store: %v", err)
 	}
@@ -169,21 +170,21 @@ func TestTokenStoreLoadSave(t *testing.T) {
 		CreatedAt:   now,
 	})
 
-	err = saveTokenStore(username, store)
+	err = saveTokenStore(userId, store)
 	if err != nil {
 		t.Fatalf("Failed to save token store: %v", err)
 	}
 
-	path := getTokenStorePath(username)
+	path := getTokenStorePath(userId)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Fatalf("Token store file should exist at %s", path)
 	}
 
 	tokenStoreMutex.Lock()
-	delete(tokenStoreCache, username)
+	delete(tokenStoreCache, userId)
 	tokenStoreMutex.Unlock()
 
-	store2, err := loadTokenStore(username)
+	store2, err := loadTokenStore(userId)
 	if err != nil {
 		t.Fatalf("Failed to reload token store: %v", err)
 	}
@@ -214,18 +215,19 @@ func TestTokenStoreDirectoryCreation(t *testing.T) {
 	USERDATA_PATH = filepath.Join(tmpDir, "nested", "path")
 	defer func() { USERDATA_PATH = origPath }()
 
-	username := "newuser"
-	store, err := loadTokenStore(username)
+	username := Username("newuser")
+	userId := username.Id()
+	store, err := loadTokenStore(userId)
 	if err != nil {
 		t.Fatalf("Failed to load token store with new path: %v", err)
 	}
 
-	err = saveTokenStore(username, store)
+	err = saveTokenStore(userId, store)
 	if err != nil {
 		t.Fatalf("Failed to save token store with new path: %v", err)
 	}
 
-	dirPath := filepath.Join(USERDATA_PATH, username)
+	dirPath := filepath.Join(USERDATA_PATH, string(userId))
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 		t.Fatalf("Token directory should exist at %s", dirPath)
 	}
@@ -293,18 +295,18 @@ func TestTokenStoreJSON(t *testing.T) {
 }
 
 func TestSubTokenIndex(t *testing.T) {
-	addToSubTokenIndex("rotur_st_test1", "user1", "st_id1")
-	addToSubTokenIndex("rotur_st_test2", "user2", "st_id2")
+	addToSubTokenIndex("rotur_st_test1", UserId("user1"), "st_id1")
+	addToSubTokenIndex("rotur_st_test2", UserId("user2"), "st_id2")
 
 	subTokenIndexMutex.RLock()
 	entry1, ok1 := subTokenIndex["rotur_st_test1"]
 	entry2, ok2 := subTokenIndex["rotur_st_test2"]
 	subTokenIndexMutex.RUnlock()
 
-	if !ok1 || entry1.Username != "user1" || entry1.TokenID != "st_id1" {
+	if !ok1 || entry1.UserId != UserId("user1") || entry1.TokenID != "st_id1" {
 		t.Error("Index entry 1 not found or incorrect")
 	}
-	if !ok2 || entry2.Username != "user2" || entry2.TokenID != "st_id2" {
+	if !ok2 || entry2.UserId != UserId("user2") || entry2.TokenID != "st_id2" {
 		t.Error("Index entry 2 not found or incorrect")
 	}
 

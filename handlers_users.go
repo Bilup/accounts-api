@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"net/http"
 	"os"
 	"slices"
 	"strconv"
@@ -239,7 +238,7 @@ func getUser(c *gin.Context) {
 			return
 		}
 
-		if v, ok := foundUser["sys.email_verified"]; ok && v != true {
+		if v, ok := foundUser["sys.email_verified"]; ok && v == false {
 			c.JSON(403, gin.H{
 				"error":              "Email address not verified",
 				"username":           foundUser.GetUsername(),
@@ -595,33 +594,6 @@ func findUserSize(username Username) int {
 	}
 	return totalSize
 }
-
-func uploadUserImage(imageType, imageData, token string) (*http.Response, error) {
-	// Avatar/banner uploads can be slow; allow extra time to avoid spurious 500s
-	client := &http.Client{Timeout: 20 * time.Second}
-	var url string
-	switch imageType {
-	case "banner":
-		url = "https://avatars.rotur.dev/rotur-upload-banner?ADMIN_TOKEN=" + os.Getenv("ADMIN_TOKEN")
-	case "pfp":
-		url = "https://avatars.rotur.dev/rotur-upload-pfp?ADMIN_TOKEN=" + os.Getenv("ADMIN_TOKEN")
-	default:
-		return nil, fmt.Errorf("invalid image type")
-	}
-	payload := fmt.Sprintf(`{"image":"%s","token":"%s"}`, imageData, token)
-	req, err := http.NewRequest("POST", url, strings.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	return resp, nil
-}
-
 func canUpdateUsernameUnsafe(username Username) (bool, string) {
 	if username == "" {
 		return false, "Invalid username"
@@ -731,24 +703,16 @@ func updateUser(c *gin.Context) {
 			c.JSON(403, gin.H{"error": "Not enough credits to set banner (10 required)"})
 			return
 		}
-		resp, err := uploadUserImage("banner", imageData, user.GetKey())
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to upload banner"})
-			return
-		}
-		if resp.StatusCode != 200 {
-			statusCode := resp.StatusCode
-			c.JSON(statusCode, gin.H{"error": "Banner upload failed"})
+		if err := saveBanner(imageData, user); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
 		if !freeAndGifUploads {
 			user.SetBalance(currencyFloat - 10)
 		}
-		go doAfter(func(data any) {
-			user.Set("sys.banner", "https://avatars.rotur.dev/.banners/"+user.GetUsername())
-			go OnUserUpdate(user.GetId(), "sys.banner", "https://avatars.rotur.dev/.banners/"+user.GetUsername())
-			go saveUsers()
-		}, nil, time.Second*2)
+		user.Set("sys.banner", "https://avatars.rotur.dev/.banners/"+user.GetUsername())
+		go OnUserUpdate(user.GetId(), "sys.banner", "https://avatars.rotur.dev/.banners/"+user.GetUsername())
+		go saveUsers()
 		c.JSON(200, gin.H{"message": "Banner uploaded successfully"})
 		return
 	}
@@ -770,21 +734,13 @@ func updateUser(c *gin.Context) {
 			}
 		}
 
-		resp, err := uploadUserImage("pfp", imageData, user.GetKey())
-		if err != nil {
-			c.JSON(500, gin.H{"error": err})
+		if err := savePfp(imageData, user); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-		if resp.StatusCode != 200 {
-			statusCode := resp.StatusCode
-			c.JSON(statusCode, gin.H{"error": "Failed to upload profile picture"})
-			return
-		}
-		go doAfter(func(data any) {
-			broadcastUserUpdate(user.GetUsername(), "pfp", "https://avatars.rotur.dev/"+user.GetUsername())
-			go OnUserUpdate(user.GetId(), "pfp", "https://avatars.rotur.dev/"+user.GetUsername())
-			go saveUsers()
-		}, nil, time.Second*2)
+		broadcastUserUpdate(user.GetUsername(), "pfp", "https://avatars.rotur.dev/"+user.GetUsername())
+		go OnUserUpdate(user.GetId(), "pfp", "https://avatars.rotur.dev/"+user.GetUsername())
+		go saveUsers()
 		c.JSON(200, gin.H{"message": "Profile picture uploaded successfully"})
 		return
 	}

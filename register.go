@@ -185,12 +185,12 @@ func handleUserGoogle(c *gin.Context) {
 	if picURL, ok := payload.Claims["picture"]; ok {
 		picture := strings.TrimSpace(fmt.Sprintf("%v", picURL))
 		if picture != "" {
-			go func(token string, username Username, pictureURL string) {
-				if err := uploadGoogleProfilePictureToRotur(token, pictureURL); err == nil {
+			go func(u User, username Username, pictureURL string) {
+				if err := uploadGoogleProfilePictureToRotur(u, pictureURL); err == nil {
 					broadcastUserUpdate(username, "pfp", "https://avatars.rotur.dev/"+username)
 					go saveUsers()
 				}
-			}(newUser.GetKey(), usernameLower, picture)
+			}(newUser, usernameLower, picture)
 		}
 	}
 
@@ -199,12 +199,7 @@ func handleUserGoogle(c *gin.Context) {
 	c.JSON(201, userCopy)
 }
 
-func uploadGoogleProfilePictureToRotur(userToken string, pictureURL string) error {
-	envOnce.Do(loadEnvFile)
-	if os.Getenv("ADMIN_TOKEN") == "" {
-		return errors.New("ADMIN_TOKEN environment variable not set")
-	}
-
+func uploadGoogleProfilePictureToRotur(user User, pictureURL string) error {
 	u, err := url.Parse(pictureURL)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
 		return errors.New("invalid picture url")
@@ -216,6 +211,7 @@ func uploadGoogleProfilePictureToRotur(userToken string, pictureURL string) erro
 		return err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("failed to fetch picture: status %d", resp.StatusCode)
 	}
@@ -238,14 +234,8 @@ func uploadGoogleProfilePictureToRotur(userToken string, pictureURL string) erro
 	}
 
 	dataURI := "data:" + contentType + ";base64," + encodeBase64(data)
-	resp2, err := uploadUserImage("pfp", dataURI, userToken)
-	if err != nil {
-		return err
-	}
-	if resp2.StatusCode != http.StatusOK {
-		return fmt.Errorf("pfp upload failed: status %d", resp2.StatusCode)
-	}
-	return nil
+
+	return savePfp(dataURI, &user)
 }
 
 func encodeBase64(b []byte) string {

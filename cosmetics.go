@@ -178,12 +178,12 @@ func saveCosmeticsCatalog() {
 	saveJsonFile(COSMETICS_FILE_PATH, cosmeticsCatalog)
 }
 
-func loadUserCosmetics(username string) (*UserCosmetics, error) {
-    return LoadUserCosmetics(username)
+func loadUserCosmetics(userId UserId) (*UserCosmetics, error) {
+	return LoadUserCosmetics(userId)
 }
 
-func saveUserCosmetics(username string, uc *UserCosmetics) error {
-    return SaveUserCosmetics(username, uc)
+func saveUserCosmetics(userId UserId, uc *UserCosmetics) error {
+	return SaveUserCosmetics(userId, uc)
 }
 
 func getCatalogEntryById(id string) (*CosmeticCatalogEntry, bool) {
@@ -329,9 +329,9 @@ func getCosmeticDetail(c *gin.Context) {
 
 func getMyCosmetics(c *gin.Context) {
 	user := c.MustGet("user").(*User)
-	username := string(user.GetUsername())
+	userId := user.GetId()
 
-	uc, err := loadUserCosmetics(username)
+	uc, err := loadUserCosmetics(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load cosmetics"})
 		return
@@ -367,7 +367,7 @@ func getMyCosmetics(c *gin.Context) {
 
 func purchaseCosmetic(c *gin.Context) {
 	user := c.MustGet("user").(*User)
-	username := string(user.GetUsername())
+	userId := user.GetId()
 	id := c.Param("id")
 
 	id, valid := validateCosmeticId(id)
@@ -390,7 +390,7 @@ func purchaseCosmetic(c *gin.Context) {
 		return
 	}
 
-	uc, err := loadUserCosmetics(username)
+	uc, err := loadUserCosmetics(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load cosmetics data"})
 		return
@@ -409,7 +409,7 @@ func purchaseCosmetic(c *gin.Context) {
 	if entry.PricingType == CosmeticFree || entry.Price == 0 {
 		uc.OwnedCosmetics = append(uc.OwnedCosmetics, id)
 		entry.Purchases++
-		if err := saveUserCosmetics(username, uc); err != nil {
+		if err := saveUserCosmetics(userId, uc); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save cosmetics data"})
 			return
 		}
@@ -487,7 +487,7 @@ func purchaseCosmetic(c *gin.Context) {
 	entry.Purchases++
 
 	uc.OwnedCosmetics = append(uc.OwnedCosmetics, id)
-	if err := saveUserCosmetics(username, uc); err != nil {
+	if err := saveUserCosmetics(userId, uc); err != nil {
 		c.JSON(500, gin.H{"error": "Failed to save cosmetics data"})
 		return
 	}
@@ -507,7 +507,7 @@ func purchaseCosmetic(c *gin.Context) {
 
 func equipCosmetic(c *gin.Context) {
 	user := c.MustGet("user").(*User)
-	username := string(user.GetUsername())
+	userId := user.GetId()
 	id := c.Param("id")
 
 	id, valid := validateCosmeticId(id)
@@ -525,7 +525,7 @@ func equipCosmetic(c *gin.Context) {
 	userCosmeticsMu.Lock()
 	defer userCosmeticsMu.Unlock()
 
-	uc, err := loadUserCosmetics(username)
+	uc, err := loadUserCosmetics(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load cosmetics data"})
 		return
@@ -545,7 +545,7 @@ func equipCosmetic(c *gin.Context) {
 	}
 
 	uc.ActiveCosmetics[entry.CosmeticType] = id
-	if err := saveUserCosmetics(username, uc); err != nil {
+	if err := saveUserCosmetics(userId, uc); err != nil {
 		c.JSON(500, gin.H{"error": "Failed to save cosmetics data"})
 		return
 	}
@@ -562,7 +562,7 @@ func equipCosmetic(c *gin.Context) {
 
 func unequipCosmetic(c *gin.Context) {
 	user := c.MustGet("user").(*User)
-	username := string(user.GetUsername())
+	userId := user.GetId()
 
 	cosmeticType := c.Query("type")
 	if cosmeticType == "" {
@@ -579,7 +579,7 @@ func unequipCosmetic(c *gin.Context) {
 	userCosmeticsMu.Lock()
 	defer userCosmeticsMu.Unlock()
 
-	uc, err := loadUserCosmetics(username)
+	uc, err := loadUserCosmetics(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load cosmetics data"})
 		return
@@ -591,7 +591,7 @@ func unequipCosmetic(c *gin.Context) {
 	}
 
 	delete(uc.ActiveCosmetics, ct)
-	if err := saveUserCosmetics(username, uc); err != nil {
+	if err := saveUserCosmetics(userId, uc); err != nil {
 		c.JSON(500, gin.H{"error": "Failed to save cosmetics data"})
 		return
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -65,8 +64,8 @@ func createSubToken(c *gin.Context) {
 		permissions = append(permissions, tp)
 	}
 
-	username := strings.ToLower(string(user.GetUsername()))
-	store, err := loadTokenStore(username)
+	userId := user.GetId()
+	store, err := loadTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
@@ -116,12 +115,12 @@ func createSubToken(c *gin.Context) {
 
 	store.Tokens = append(store.Tokens, subToken)
 
-	if err := saveTokenStore(username, store); err != nil {
+	if err := saveTokenStore(userId, store); err != nil {
 		c.JSON(500, gin.H{"error": "Failed to save token store"})
 		return
 	}
 
-	addToSubTokenIndex(tokenValue, username, tokenID)
+	addToSubTokenIndex(tokenValue, userId, tokenID)
 
 	c.JSON(201, SubTokenCreate{
 		ID:          tokenID,
@@ -139,8 +138,8 @@ func createSubToken(c *gin.Context) {
 func listSubTokens(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 
-	username := strings.ToLower(string(user.GetUsername()))
-	store, err := loadTokenStore(username)
+	userId := user.GetId()
+	store, err := loadTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
@@ -161,8 +160,8 @@ func getSubToken(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 	tokenID := c.Param("id")
 
-	username := strings.ToLower(string(user.GetUsername()))
-	store, err := loadTokenStore(username)
+	userId := user.GetId()
+	store, err := loadTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
@@ -201,8 +200,8 @@ func updateSubToken(c *gin.Context) {
 		return
 	}
 
-	username := strings.ToLower(string(user.GetUsername()))
-	store, err := loadTokenStore(username)
+	userId := user.GetId()
+	store, err := loadTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
@@ -254,7 +253,7 @@ func updateSubToken(c *gin.Context) {
 				t.Websites = req.Websites
 			}
 
-			if err := saveTokenStore(username, store); err != nil {
+			if err := saveTokenStore(userId, store); err != nil {
 				c.JSON(500, gin.H{"error": "Failed to save token store"})
 				return
 			}
@@ -278,8 +277,8 @@ func revokeSubToken(c *gin.Context) {
 
 	tokenID := c.Param("id")
 
-	username := strings.ToLower(string(user.GetUsername()))
-	store, err := loadTokenStore(username)
+	userId := user.GetId()
+	store, err := loadTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
@@ -297,7 +296,7 @@ func revokeSubToken(c *gin.Context) {
 			t.Revoked = true
 			t.RevokedAt = &now
 
-			if err := saveTokenStore(username, store); err != nil {
+			if err := saveTokenStore(userId, store); err != nil {
 				c.JSON(500, gin.H{"error": "Failed to save token store"})
 				return
 			}
@@ -323,8 +322,8 @@ func deleteSubToken(c *gin.Context) {
 
 	tokenID := c.Param("id")
 
-	username := strings.ToLower(string(user.GetUsername()))
-	store, err := loadTokenStore(username)
+	userId := user.GetId()
+	store, err := loadTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
@@ -349,7 +348,7 @@ func deleteSubToken(c *gin.Context) {
 	}
 
 	store.Tokens = newTokens
-	if err := saveTokenStore(username, store); err != nil {
+	if err := saveTokenStore(userId, store); err != nil {
 		c.JSON(500, gin.H{"error": "Failed to save token store"})
 		return
 	}
@@ -384,8 +383,8 @@ func renameSubToken(c *gin.Context) {
 		return
 	}
 
-	username := strings.ToLower(string(user.GetUsername()))
-	store, err := loadTokenStore(username)
+	userId := user.GetId()
+	store, err := loadTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
@@ -395,7 +394,7 @@ func renameSubToken(c *gin.Context) {
 		t := &store.Tokens[i]
 		if t.ID == tokenID {
 			t.Name = req.Name
-			if err := saveTokenStore(username, store); err != nil {
+			if err := saveTokenStore(userId, store); err != nil {
 				c.JSON(500, gin.H{"error": "Failed to save token store"})
 				return
 			}
@@ -419,8 +418,8 @@ func listPermissions(c *gin.Context) {
 func listActiveSubTokens(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 
-	username := strings.ToLower(string(user.GetUsername()))
-	store, err := loadTokenStore(username)
+	userId := user.GetId()
+	store, err := loadTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
@@ -448,8 +447,8 @@ func getSubTokenActivity(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 	tokenID := c.Param("id")
 
-	username := strings.ToLower(string(user.GetUsername()))
-	store, err := loadTokenStore(username)
+	userId := user.GetId()
+	store, err := loadTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
