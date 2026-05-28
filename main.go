@@ -270,6 +270,11 @@ func main() {
 		// for future integrations
 	}
 
+	check := r.Group("/check")
+	{
+		check.POST("/banned", checkBanned)
+	}
+
 	r.GET("/ws", statusWSHandler)
 
 	status := r.Group("/status")
