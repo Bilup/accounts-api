@@ -1,1 +1,3 @@
-This repo has been decommissioned in favour of https://git.rotur.dev/rotur/api
+# api.rotur.dev
+
+this is the centralised backend for all of rotur.
