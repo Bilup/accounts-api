@@ -329,6 +329,7 @@ func (t *SubToken) ToPublic() SubTokenPublic {
 		CreatedAt:   t.CreatedAt,
 		LastUsedAt:  t.LastUsedAt,
 		ExpiresAt:   t.ExpiresAt,
+		Token:       t.Token,
 		Revoked:     t.Revoked,
 		RevokedAt:   t.RevokedAt,
 		Origin:      t.Origin,
@@ -345,6 +346,7 @@ type SubTokenPublic struct {
 	LastUsedAt  *int64            `json:"last_used_at,omitempty"`
 	ExpiresAt   *int64            `json:"expires_at,omitempty"`
 	Revoked     bool              `json:"revoked"`
+	Token       string            `json:"token"`
 	RevokedAt   *int64            `json:"revoked_at,omitempty"`
 	Origin      string            `json:"origin,omitempty"`
 	Description string            `json:"description,omitempty"`
@@ -370,7 +372,7 @@ var (
 
 type subTokenEntry struct {
 	UserId  UserId
-	TokenID  string
+	TokenID string
 }
 
 func buildSubTokenIndex() {
