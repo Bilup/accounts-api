@@ -162,6 +162,8 @@ func main() {
 	me := r.Group("/me")
 	{
 		me.POST("/update", updateUser)
+		me.GET("/benefits", requiresAuth, requirePermission(PermViewProfile), getUserSubscriptionBenefits)
+
 		me.POST("/refresh_token", requiresAuth, requireMainToken(), refreshToken)
 		me.POST("/transfer", requiresAuth, requirePermission(PermTransferCredits), transferCredits)
 		me.POST("/gamble", requiresAuth, requirePermission(PermManageCredits), gambleCredits)

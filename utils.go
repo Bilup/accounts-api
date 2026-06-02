@@ -117,9 +117,7 @@ func hasTierOrHigher(tier string, required string) bool {
 	switch strings.ToLower(required) {
 	case "max":
 		return tier == "max"
-	case "pro":
-		return tier == "pro" || tier == "max"
-	case "drive":
+	case "pro", "drive":
 		return tier == "drive" || tier == "pro" || tier == "max"
 	case "lite":
 		return tier == "lite" || tier == "drive" || tier == "pro" || tier == "max"

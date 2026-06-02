@@ -187,3 +187,15 @@ func setSubscription(c *gin.Context) {
 
 	c.JSON(200, gin.H{"message": "Subscription updated successfully"})
 }
+
+func getUserSubscriptionBenefits(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+
+	benefits := user.GetSubscriptionBenefits()
+	sub := user.GetSubscription()
+
+	c.JSON(200, gin.H{
+		"benefits":     benefits,
+		"subscription": sub,
+	})
+}

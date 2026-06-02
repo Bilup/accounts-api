@@ -135,6 +135,11 @@ func avatarHandler(c *gin.Context) {
 	}
 
 	username := Username(usernameStr)
+	if len(usernameStr) == 36 {
+		// likely a user id
+		username = UserId(usernameStr).User().GetUsername()
+	}
+
 	radiusStr := c.Query("radius")
 	sizeStr := c.Query("s")
 	clientEtag := c.GetHeader("If-None-Match")
@@ -142,8 +147,8 @@ func avatarHandler(c *gin.Context) {
 	filePath, contentType, baseEtag, metaErr := getAvatarMetadata(username)
 
 	tier, _ := getUserTierCached(username)
-	isPro := hasTierOrHigher(tier, "Drive")
-	forceFirstFrameJpeg := !isPro && metaErr == nil && contentType == "image/gif"
+	allowAnimated := hasTierOrHigher(tier, "plus")
+	forceFirstFrameJpeg := !allowAnimated && metaErr == nil && contentType == "image/gif"
 	finalEtagBase := baseEtag
 	if metaErr != nil {
 		contentType = "image/jpeg"
@@ -321,6 +326,10 @@ func overlayHandler(c *gin.Context) {
 	usernameStr, _ := strings.CutSuffix(strings.ToLower(c.Param("username")), ".gif")
 
 	username := Username(usernameStr)
+	if len(usernameStr) == 36 {
+		// likely a user id
+		username = UserId(usernameStr).User().GetUsername()
+	}
 
 	if _, exists := getUserTierCached(username); !exists {
 		sendEmpty(c)
@@ -517,6 +526,10 @@ func bannerHandler(c *gin.Context) {
 	}
 
 	username := Username(usernameStr)
+	if len(usernameStr) == 36 {
+		// likely a user id
+		username = UserId(usernameStr).User().GetUsername()
+	}
 
 	radiusStr := c.Query("radius")
 	radiusInt, parseErr := strconv.Atoi(strings.TrimSuffix(radiusStr, "px"))

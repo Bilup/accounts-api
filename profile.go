@@ -87,8 +87,8 @@ func renderBioRegex(bio string, profile User, otherKeys profileResp) string {
 			return ""
 		case "time":
 			tier := profile.GetSubscription().Tier
-			if !hasTierOrHigher(tier, "drive") {
-				return "{{ Error, time only available to Drive users }}"
+			if !hasTierOrHigher(tier, "plus") {
+				return "{{ Error, time only available to Plus users }}"
 			}
 
 			format := strings.TrimSpace(key)

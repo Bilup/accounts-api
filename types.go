@@ -434,7 +434,7 @@ var subs_benefits = map[string]sub_benefits{
 	"free":  tierFree(),
 	"lite":  tierLite(),
 	"plus":  tierPlus(),
-	"drive": tierDrive(),
+	"drive": tierPro(), // drive is just an alias for pro now
 	"pro":   tierPro(),
 	"max":   tierMax(),
 }
@@ -463,11 +463,6 @@ func tierPlus() sub_benefits {
 	b := tierLite()
 	b.FileSystem_Size = 15_000_000
 	b.Has_Profile_notes = true
-	return b
-}
-
-func tierDrive() sub_benefits {
-	b := tierPlus()
 	b.Max_Keys = 20
 	b.Max_Login_History = 100
 	b.Max_Rmails = 1000
@@ -480,7 +475,7 @@ func tierDrive() sub_benefits {
 }
 
 func tierPro() sub_benefits {
-	b := tierDrive()
+	b := tierPlus()
 	b.Max_Keys = 50
 	b.Max_Rmails = 100_000
 	b.FileSystem_Size = 1_000_000_000

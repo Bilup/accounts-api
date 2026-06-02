@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-
 func TestGenerateToken(t *testing.T) {
 	token := generateToken()
 	if token == "" {
@@ -27,7 +26,6 @@ func TestGenerateTokenUniqueness(t *testing.T) {
 	}
 }
 
-
 func TestGenerateShortToken(t *testing.T) {
 	token := generateShortToken()
 	if token == "" {
@@ -48,7 +46,6 @@ func TestGenerateShortTokenUniqueness(t *testing.T) {
 		seen[token] = true
 	}
 }
-
 
 func TestRoundVal(t *testing.T) {
 	tests := []struct {
@@ -78,7 +75,6 @@ func TestRoundValPrecision(t *testing.T) {
 	}
 }
 
-
 func TestGetStringOrDefault(t *testing.T) {
 	if got := getStringOrDefault("hello", "default"); got != "hello" {
 		t.Errorf("getStringOrDefault(\"hello\", ...) = %q, want %q", got, "hello")
@@ -106,7 +102,6 @@ func TestGetStringOrEmpty(t *testing.T) {
 	}
 }
 
-
 func TestGetIntOrDefault(t *testing.T) {
 	if got := getIntOrDefault(5, 0); got != 5 {
 		t.Errorf("getIntOrDefault(5, 0) = %d, want 5", got)
@@ -125,7 +120,6 @@ func TestGetIntOrDefault(t *testing.T) {
 	}
 }
 
-
 func TestGetFloatOrDefault(t *testing.T) {
 	if got := getFloatOrDefault(3.14, 0.0); got != 3.14 {
 		t.Errorf("getFloatOrDefault(3.14, 0) = %v, want 3.14", got)
@@ -141,7 +135,6 @@ func TestGetFloatOrDefault(t *testing.T) {
 	}
 }
 
-
 func TestHasTierOrHigher(t *testing.T) {
 	tests := []struct {
 		tier     string
@@ -149,23 +142,23 @@ func TestHasTierOrHigher(t *testing.T) {
 		expected bool
 	}{
 		{"free", "lite", false},
-		{"free", "drive", false},
+		{"free", "pro", false},
 		{"free", "pro", false},
 		{"free", "max", false},
 		{"lite", "lite", true},
-		{"lite", "drive", false},
+		{"lite", "pro", false},
 		{"lite", "pro", false},
 		{"lite", "max", false},
-		{"drive", "lite", true},
-		{"drive", "drive", true},
-		{"drive", "pro", false},
-		{"drive", "max", false},
 		{"pro", "lite", true},
-		{"pro", "drive", true},
+		{"pro", "pro", true},
+		{"pro", "pro", false},
+		{"pro", "max", false},
+		{"pro", "lite", true},
+		{"pro", "pro", true},
 		{"pro", "pro", true},
 		{"pro", "max", false},
 		{"max", "lite", true},
-		{"max", "drive", true},
+		{"max", "pro", true},
 		{"max", "pro", true},
 		{"max", "max", true},
 		{"unknown", "free", false},
@@ -187,7 +180,6 @@ func TestHasTierOrHigherCaseInsensitive(t *testing.T) {
 		t.Error("hasTierOrHigher should handle uppercase input")
 	}
 }
-
 
 func TestHasRequiredStanding(t *testing.T) {
 	tests := []struct {
@@ -220,7 +212,6 @@ func TestHasRequiredStanding(t *testing.T) {
 	}
 }
 
-
 func TestClamp(t *testing.T) {
 	if got := clamp(5, 1, 10); got != 5 {
 		t.Errorf("clamp(5, 1, 10) = %d, want 5", got)
@@ -239,7 +230,6 @@ func TestClamp(t *testing.T) {
 	}
 }
 
-
 func TestJSONStringify(t *testing.T) {
 	if got := JSONStringify(map[string]string{"key": "value"}); got != `{"key":"value"}` {
 		t.Errorf("JSONStringify(map) = %q, want %q", got, `{"key":"value"}`)
@@ -251,7 +241,6 @@ func TestJSONStringify(t *testing.T) {
 		t.Errorf("JSONStringify(int) = %q, want %q", got, `42`)
 	}
 }
-
 
 func TestIsValidJSON(t *testing.T) {
 	if !isValidJSON(`{"key": "value"}`) {
@@ -274,7 +263,6 @@ func TestIsValidJSON(t *testing.T) {
 	}
 }
 
-
 func TestIsFromBannedDomain(t *testing.T) {
 	if !isFromBannedDomain("https://pornhub.com/video") {
 		t.Error("should detect banned domain")
@@ -292,7 +280,6 @@ func TestIsFromBannedDomain(t *testing.T) {
 		t.Error("should not flag unrelated domain")
 	}
 }
-
 
 func TestGenerateGiftCode(t *testing.T) {
 	code := generateGiftCode()
