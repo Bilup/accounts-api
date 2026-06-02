@@ -298,7 +298,7 @@ func main() {
 		tokens.GET("", requiresAuth, requirePermission(PermManageTokens), listSubTokens)
 		tokens.GET("/active", requiresAuth, requirePermission(PermManageTokens), listActiveSubTokens)
 		tokens.POST("/create", requiresAuth, requireMainToken(), createSubToken)
-		tokens.GET("/:id", requiresAuth, requirePermission(PermManageTokens), getSubToken)
+		tokens.GET("/:id", requiresAuth, getSubToken)
 		tokens.GET("/:id/activity", requiresAuth, requirePermission(PermManageTokens), getSubTokenActivity)
 		tokens.PATCH("/:id", requiresAuth, requireMainToken(), updateSubToken)
 		tokens.POST("/:id/rename", requiresAuth, requireMainToken(), renameSubToken)

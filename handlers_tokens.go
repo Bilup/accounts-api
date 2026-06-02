@@ -157,9 +157,21 @@ func listSubTokens(c *gin.Context) {
 }
 
 func getSubToken(c *gin.Context) {
-	user := c.MustGet("user").(*User)
 	tokenID := c.Param("id")
+	tokenType := c.MustGet("token_type").(string)
 
+	if tokenType == "sub" {
+		subTokenVal, _ := c.Get("sub_token")
+		subToken, ok := subTokenVal.(*SubToken)
+		if !ok || subToken.ID != tokenID {
+			c.JSON(403, gin.H{"error": "Sub-tokens can only view their own token info"})
+			return
+		}
+		c.JSON(200, subToken.ToPublic())
+		return
+	}
+
+	user := c.MustGet("user").(*User)
 	userId := user.GetId()
 	store, err := loadTokenStore(userId)
 	if err != nil {
