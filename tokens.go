@@ -45,6 +45,9 @@ const (
 	PermManageGroups      TokenPermission = "groups:manage"
 	PermJoinGroup         TokenPermission = "groups:join"
 	PermLeaveGroup        TokenPermission = "groups:leave"
+	PermViewGroupMembers  TokenPermission = "groups:members.view"
+	PermInviteGroup      TokenPermission = "groups:invite"
+	PermBanGroup         TokenPermission = "groups:ban"
 	PermViewNotifications TokenPermission = "notifications:view"
 	PermSendNotifications TokenPermission = "notifications:send"
 	PermViewGifts         TokenPermission = "gifts:view"
@@ -62,6 +65,7 @@ const (
 	PermViewCosmetics     TokenPermission = "cosmetics:view"
 	PermBuyCosmetics      TokenPermission = "cosmetics:buy"
 	PermEquipCosmetics    TokenPermission = "cosmetics:equip"
+	PermGiftCosmetics     TokenPermission = "cosmetics:gift"
 )
 
 func AllPermissions() []TokenPermission {
@@ -98,6 +102,10 @@ func AllPermissions() []TokenPermission {
 		PermManageGroups,
 		PermJoinGroup,
 		PermLeaveGroup,
+		PermViewGroupMembers,
+		PermInviteGroup,
+		PermBanGroup,
+		PermInviteGroup,
 		PermViewNotifications,
 		PermSendNotifications,
 		PermViewGifts,
@@ -115,6 +123,7 @@ func AllPermissions() []TokenPermission {
 		PermViewCosmetics,
 		PermBuyCosmetics,
 		PermEquipCosmetics,
+		PermGiftCosmetics,
 	}
 }
 
@@ -132,7 +141,7 @@ func PermissionGroups() []PermissionGroup {
 			Permissions: []TokenPermission{
 				PermViewProfile, PermViewCredits, PermViewFriends,
 				PermViewPosts, PermViewFollowing, PermViewFiles,
-				PermViewKeys, PermViewGroups, PermViewNotifications,
+				PermViewKeys, PermViewGroups, PermViewGroupMembers, PermViewNotifications,
 				PermViewGifts, PermViewItems, PermViewCosmetics, PermViewBlocked,
 			},
 		},
@@ -156,7 +165,7 @@ func PermissionGroups() []PermissionGroup {
 				PermTransferCredits, PermClaimDaily,
 				PermViewGifts, PermCreateGift, PermClaimGift, PermCancelGift,
 				PermViewItems, PermBuyItems, PermSellItems, PermManageItems,
-				PermViewCosmetics, PermBuyCosmetics, PermEquipCosmetics,
+				PermViewCosmetics, PermBuyCosmetics, PermEquipCosmetics, PermGiftCosmetics,
 			},
 		},
 		{

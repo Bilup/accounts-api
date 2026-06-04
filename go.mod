@@ -14,6 +14,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/logica0419/resigif v1.1.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
+	golang.org/x/crypto v0.46.0
 	google.golang.org/api v0.258.0
 )
 
@@ -53,7 +54,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	golang.org/x/arch v0.20.0 // indirect
-	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/image v0.32.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect

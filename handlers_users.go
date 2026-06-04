@@ -109,7 +109,15 @@ func findAccountByLogin(username string, password string) (User, error) {
 	idToUserMutex.RLock()
 	user := idToUser[uid]
 	idToUserMutex.RUnlock()
-	if user != nil && user.GetPassword() == password {
+	if user == nil {
+		return nil, fmt.Errorf("account not found for login")
+	}
+	matched, needsUpgrade := VerifyPassword(user, password)
+	if matched {
+		if needsUpgrade {
+			UpgradePasswordToV1(user, password)
+			go saveUsers()
+		}
 		return user, nil
 	}
 	return nil, fmt.Errorf("account not found for login")
@@ -190,6 +198,7 @@ func getUserBy(c *gin.Context) {
 
 	copy := copyUser(foundUsers[0])
 	delete(copy, "password")
+	delete(copy, "sys.salt")
 
 	c.JSON(200, userToNet(copy))
 }
@@ -198,6 +207,8 @@ func getUser(c *gin.Context) {
 	authKey := c.Query("auth")
 
 	var foundUser User
+
+	var subToken *SubToken
 
 	if authKey != "" {
 		foundUsers, _ := getAccountsBy("key", authKey, 1)
@@ -208,9 +219,10 @@ func getUser(c *gin.Context) {
 				return
 			}
 		} else {
-			subUser, _, err := authenticateWithSubTokenFast(authKey)
+			subUser, st, err := authenticateWithSubTokenFast(authKey)
 			if err == nil && subUser != nil {
 				foundUser = *subUser
+				subToken = st
 			}
 		}
 	}
@@ -282,7 +294,18 @@ func getUser(c *gin.Context) {
 		addLogin(c, foundUser, "Successful Login")
 
 		go saveUsers()
+
+		if subToken != nil {
+			if !subToken.hasPermission(PermViewProfile) {
+				c.JSON(200, userToProfileOnly(foundUser, authKey))
+				return
+			}
+			c.JSON(200, userToNetWithSubToken(foundUser, authKey))
+			return
+		}
+
 		c.JSON(200, userToNet(foundUser))
+
 		return
 	}
 
@@ -294,7 +317,7 @@ func userToNet(user User) User {
 	mu.Lock()
 	userCopy := make(User, len(user)+4)
 	for k, v := range user {
-		if k == "password" {
+		if k == "password" || k == "sys.salt" {
 			continue
 		}
 		userCopy[k] = v
@@ -312,6 +335,71 @@ func userToNet(user User) User {
 	userCopy["sys.transactions"] = netTransactions
 
 	return userCopy
+}
+
+func userToNetWithSubToken(user User, subTokenValue string) User {
+	netUser := userToNet(user)
+	netUser["key"] = subTokenValue
+	return netUser
+}
+
+func userToProfileOnly(user User, subTokenValue string) map[string]any {
+	username := user.GetUsername()
+	userIndex := getIdxOfAccountBy("username", string(username.ToLower()))
+	userId := user.GetId()
+	followersMutex.RLock()
+	followerCount := 0
+	if data, exists := followersData[userId]; exists {
+		followerCount = len(data.Followers)
+	}
+	followingCount := followingCountMap[userId]
+	followersMutex.RUnlock()
+	maxSizeStr := user.GetMaxSize()
+	sub := user.GetSubscription().Tier
+	calculatedBadges := calculateUserBadges(user)
+	st := hub.getUserStatus(user.GetId())
+	bio := getStringOrEmpty(user.Get("bio"))
+	benefits := user.GetSubscriptionBenefits()
+	if len(bio) > benefits.Bio_Length {
+		bio = bio[:benefits.Bio_Length]
+	}
+	profileData := map[string]any{
+		"key":          subTokenValue,
+		"username":     username,
+		"pfp":          "https://avatars.rotur.dev/" + string(username),
+		"sys.banned":   user.IsBanned(),
+		"private":      user.IsPrivate(),
+		"bio":          bio,
+		"followers":    followerCount,
+		"following":    followingCount,
+		"pronouns":     getStringOrEmpty(user.Get("pronouns")),
+		"system":       user.GetSystem(),
+		"created":      user.GetCreated(),
+		"badges":       calculatedBadges,
+		"subscription": sub,
+		"max_size":     maxSizeStr,
+		"currency":     user.GetCredits(),
+		"index":        userIndex + 1,
+		"status":       st,
+		"id":           userId,
+	}
+	if user.Get("sys.banner") != nil || user.Get("banner") != nil {
+		profileData["banner"] = "https://avatars.rotur.dev/.banners/" + string(username)
+	}
+	// Resolve group tag
+	if gid, ok := user["sys.group"]; ok {
+		if id, ok := gid.(string); ok && id != "" {
+			groupsDataMutex.RLock()
+			for tag, data := range groupsData {
+				if string(data.Group.Id) == id {
+					profileData["group_tag"] = tag
+					break
+				}
+			}
+			groupsDataMutex.RUnlock()
+		}
+	}
+	return profileData
 }
 
 func checkAuth(c *gin.Context) {
@@ -509,7 +597,7 @@ func registerUser(c *gin.Context) {
 		return
 	}
 
-	if ok, msg := ValidatePasswordHash(password); !ok {
+	if ok, msg := ValidatePassword(password); !ok {
 		c.JSON(400, gin.H{"error": msg})
 		return
 	}
@@ -550,6 +638,8 @@ func registerUser(c *gin.Context) {
 
 	userCopy := copyUser(newUser)
 	delete(userCopy, "password")
+	delete(userCopy, "sys.email_verify_token")
+	delete(userCopy, "sys.salt")
 	c.JSON(201, userCopy)
 }
 

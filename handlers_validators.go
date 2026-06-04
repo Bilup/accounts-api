@@ -74,6 +74,12 @@ func generateValidator(c *gin.Context) {
 		return
 	}
 
+	token_type := c.MustGet("token_type")
+	if token_type == "sub" {
+		user := subTokenIndex[authKey].UserId.User()
+		authKey = user.GetKey()
+	}
+
 	id := user.GetId()
 	timestamp := time.Now().Unix()
 	hashedKey := hashValidator(key, authKey, windowStart(timestamp))

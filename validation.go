@@ -11,10 +11,9 @@ import (
 
 var (
 	usernameAllowedRe = regexp.MustCompile("^[a-z0-9_]+$")
-
-	bannedWordsOnce sync.Once
-	bannedWords     []string
-	bannedWordsErr  error
+	bannedWordsOnce   sync.Once
+	bannedWords       []string
+	bannedWordsErr    error
 )
 
 func loadBannedWordsLocal() ([]string, error) {
@@ -25,7 +24,6 @@ func loadBannedWordsLocal() ([]string, error) {
 			return
 		}
 		defer file.Close()
-
 		var words []string
 		if err := json.NewDecoder(file).Decode(&words); err != nil {
 			bannedWordsErr = fmt.Errorf("error decoding banned_words.json: %w", err)
@@ -38,7 +36,6 @@ func loadBannedWordsLocal() ([]string, error) {
 
 func ValidateUsername(username Username) (bool, string) {
 	usernameLower := string(username.ToLower())
-
 	if usernameLower == "" {
 		return false, "Username is required"
 	}
@@ -51,7 +48,6 @@ func ValidateUsername(username Username) (bool, string) {
 	if !usernameAllowedRe.MatchString(usernameLower) {
 		return false, "Username contains invalid characters"
 	}
-
 	words, err := loadBannedWordsLocal()
 	if err == nil {
 		for _, banned := range words {
@@ -63,28 +59,26 @@ func ValidateUsername(username Username) (bool, string) {
 			u = strings.ReplaceAll(u, "0", "o")
 			u = strings.ReplaceAll(u, "8", "b")
 			u = strings.ReplaceAll(u, "@", "a")
-
 			if strings.Contains(strings.ToLower(u), strings.ToLower(banned)) {
 				return false, "Username contains a banned word"
 			}
 		}
 	}
-
 	return true, ""
 }
 
-func ValidatePasswordHash(password string) (bool, string) {
+func ValidatePassword(password string) (bool, string) {
 	if password == "" {
-		return false, "Username and password are required"
+		return false, "Password is required"
 	}
-	if len(password) != 32 {
-		return false, "Invalid password hash"
+	if len(password) < 8 {
+		return false, "Password must be at least 8 characters"
 	}
-	if password == "d41d8cd98f00b204e9800998ecf8427e" {
-		return false, "Password cannot be empty"
+	if len(password) > 128 {
+		return false, "Password must be at most 128 characters"
 	}
-	if regexp.MustCompile("^[a-fA-F0-9]{32}$").FindStringIndex(password) == nil {
-		return false, "Invalid password hash"
+	if isMD5Hex(password) {
+		return false, "Password looks like an MD5 hash - please use a real password"
 	}
 	return true, ""
 }

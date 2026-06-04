@@ -3,10 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -69,6 +65,23 @@ const (
 	JoinPolicyInvite  JoinPolicy = "INVITE"
 )
 
+type InviteStatus string
+
+const (
+	InvitePending  InviteStatus = "PENDING"
+	InviteAccepted InviteStatus = "ACCEPTED"
+	InviteDeclined InviteStatus = "DECLINED"
+	InviteRevoked  InviteStatus = "REVOKED"
+)
+
+type RequestStatus string
+
+const (
+	RequestPending  RequestStatus = "PENDING"
+	RequestAccepted RequestStatus = "ACCEPTED"
+	RequestDeclined RequestStatus = "DECLINED"
+)
+
 type GroupFile struct {
 	Group           Group                          `json:"group"`
 	Members         []GroupMember                  `json:"members"`
@@ -84,13 +97,32 @@ type Group struct {
 	Tag            string     `json:"tag"`
 	Name           string     `json:"name"`
 	Description    string     `json:"description"`
+	Readme         string     `json:"readme"`
+	Rules          string     `json:"rules"`
 	IconUrl        string     `json:"icon_url"`
 	BannerUrl      string     `json:"banner_url"`
 	OwnerUserId    UserId     `json:"owner_user_id"`
 	Public         bool       `json:"public"`
 	JoinPolicy     JoinPolicy `json:"join_policy"`
+	EntryFee       float64    `json:"entry_fee"`
 	CreatedAt      int64      `json:"created_at"`
 	CreditsBalance float64    `json:"credits_balance"`
+}
+
+func getGroupById(id GroupId) (*Group, bool) {
+	if id == "" {
+		return &Group{}, false
+	}
+
+	groupsDataMutex.RLock()
+	defer groupsDataMutex.RUnlock()
+
+	for _, data := range groupsData {
+		if data.Group.Id == id {
+			return &data.Group, true
+		}
+	}
+	return &Group{}, false
 }
 
 func getGroupByName(name string) (*Group, bool) {
@@ -110,34 +142,13 @@ func getGroupByName(name string) (*Group, bool) {
 }
 
 func getGroupDataByTag(tag string) (*GroupData, bool) {
-	if tag == "" {
+	groupsDataMutex.RLock()
+	data, ok := groupsData[tag]
+	groupsDataMutex.RUnlock()
+	if !ok {
 		return nil, false
 	}
-
-	path := filepath.Join(GROUPS_FILE_PATH, tag+".json")
-	var group GroupData
-	if !fileExists(path) {
-		return nil, false
-	}
-	data, err := os.Open(path)
-	if err != nil {
-		log.Printf("Error opening group data from %s: %v", tag, err)
-		return nil, false
-	}
-	defer data.Close()
-	dataBytes, err := io.ReadAll(data)
-
-	if err != nil {
-		log.Printf("Error reading group data from %s: %v", tag, err)
-		return nil, false
-	}
-
-	if err := json.Unmarshal(dataBytes, &group); err != nil {
-		log.Printf("Error unmarshaling group data from %s: %v", tag, err)
-		return nil, false
-	}
-
-	return &group, true
+	return data, true
 }
 
 func getGroupByTag(tag string) (*Group, bool) {
@@ -228,22 +239,17 @@ func addGroupEvent(groupTag string, event GroupEvent) {
 }
 
 func getGroupTips(groupTag string) []GroupTip {
-	data, exists := getGroupDataByTag(groupTag)
-	if !exists {
-		return []GroupTip{}
-	}
-	return data.Tips
+	return loadGroupTips(groupTag)
 }
 
 func addGroupTip(groupTag string, tip GroupTip) {
+	tips := loadGroupTips(groupTag)
+	tips = append(tips, tip)
 	groupsDataMutex.Lock()
-	defer groupsDataMutex.Unlock()
-
 	data := groupsData[groupTag]
-	data.Tips = append(data.Tips, tip)
-
 	data.Group.CreditsBalance += tip.AmountCredits
-
+	groupsDataMutex.Unlock()
+	go saveGroupTips(groupTag, tips)
 	go saveGroupData(groupTag)
 }
 
@@ -279,11 +285,14 @@ type GroupPublic struct {
 	Tag            string     `json:"tag"`
 	Name           string     `json:"name"`
 	Description    string     `json:"description"`
+	Readme         string     `json:"readme"`
+	Rules          string     `json:"rules"`
 	IconUrl        string     `json:"icon_url"`
 	BannerUrl      string     `json:"banner_url"`
 	OwnerUserId    Username   `json:"owner_user_id"`
 	Public         bool       `json:"public"`
 	JoinPolicy     JoinPolicy `json:"join_policy"`
+	EntryFee       float64    `json:"entry_fee"`
 	CreatedAt      int64      `json:"created_at"`
 	CreditsBalance float64    `json:"credits_balance"`
 	MemberCount    int        `json:"member_count"`
@@ -294,11 +303,14 @@ type GroupNet struct {
 	Tag            string     `json:"tag"`
 	Name           string     `json:"name"`
 	Description    string     `json:"description"`
+	Readme         string     `json:"readme"`
+	Rules          string     `json:"rules"`
 	IconUrl        string     `json:"icon_url"`
 	BannerUrl      string     `json:"banner_url"`
 	OwnerUserId    Username   `json:"owner_user_id"`
 	Public         bool       `json:"public"`
 	JoinPolicy     JoinPolicy `json:"join_policy"`
+	EntryFee       float64    `json:"entry_fee"`
 	CreatedAt      int64      `json:"created_at"`
 	CreditsBalance float64    `json:"credits_balance"`
 	MemberCount    int        `json:"member_count"`
@@ -310,11 +322,14 @@ func (g Group) ToNet() GroupNet {
 		Tag:            g.Tag,
 		Name:           g.Name,
 		Description:    g.Description,
+		Readme:         g.Readme,
+		Rules:          g.Rules,
 		IconUrl:        g.IconUrl,
 		BannerUrl:      g.BannerUrl,
 		OwnerUserId:    g.OwnerUserId.User().GetUsername(),
 		Public:         g.Public,
 		JoinPolicy:     g.JoinPolicy,
+		EntryFee:       g.EntryFee,
 		CreatedAt:      g.CreatedAt,
 		CreditsBalance: g.CreditsBalance,
 		MemberCount:    0,
@@ -326,11 +341,14 @@ func (g *Group) ToPublic() GroupPublic {
 		Tag:            g.Tag,
 		Name:           g.Name,
 		Description:    g.Description,
+		Readme:         g.Readme,
+		Rules:          g.Rules,
 		IconUrl:        g.IconUrl,
 		BannerUrl:      g.BannerUrl,
 		OwnerUserId:    g.OwnerUserId.User().GetUsername(),
 		Public:         g.Public,
 		JoinPolicy:     g.JoinPolicy,
+		EntryFee:       g.EntryFee,
 		CreatedAt:      g.CreatedAt,
 		CreditsBalance: g.CreditsBalance,
 		MemberCount:    0,
@@ -395,6 +413,14 @@ type GroupTip struct {
 	CreatedAt     int64   `json:"created_at"`
 }
 
+type GroupTipWithdrawal struct {
+	Id            string  `json:"id"`
+	GroupTag      string  `json:"group_tag"`
+	ToUserId      UserId  `json:"to_user_id"`
+	AmountCredits float64 `json:"amount_credits"`
+	CreatedAt     int64   `json:"created_at"`
+}
+
 type GroupBenefitProduct struct {
 	Id             string  `json:"id"`
 	GroupTag       string  `json:"group_tag"`
@@ -405,6 +431,33 @@ type GroupBenefitProduct struct {
 	BenefitGranted string  `json:"benefit_granted,omitempty"`
 }
 
+type GroupInvite struct {
+	Id         string       `json:"id"`
+	GroupTag   string       `json:"group_tag"`
+	FromUserId UserId       `json:"from_user_id"`
+	ToUserId   UserId       `json:"to_user_id"`
+	Status     InviteStatus `json:"status"`
+	CreatedAt  int64        `json:"created_at"`
+}
+
+type GroupJoinRequest struct {
+	Id        string        `json:"id"`
+	GroupTag  string        `json:"group_tag"`
+	UserId    UserId        `json:"user_id"`
+	Message   string        `json:"message"`
+	Status    RequestStatus `json:"status"`
+	CreatedAt int64         `json:"created_at"`
+}
+
+type GroupBan struct {
+	Id        string `json:"id"`
+	GroupTag  string `json:"group_tag"`
+	UserId    UserId `json:"user_id"`
+	BannedBy  UserId `json:"banned_by"`
+	Reason    string `json:"reason"`
+	CreatedAt int64  `json:"created_at"`
+}
+
 type GroupData struct {
 	Group           Group                          `json:"group"`
 	Members         []GroupMember                  `json:"members"`
@@ -413,6 +466,9 @@ type GroupData struct {
 	Events          map[string]GroupEvent          `json:"events"`
 	Tips            []GroupTip                     `json:"tips"`
 	BenefitProducts map[string]GroupBenefitProduct `json:"benefit_products"`
+	Invites         []GroupInvite                  `json:"invites"`
+	JoinRequests    []GroupJoinRequest             `json:"join_requests"`
+	Bans            []GroupBan                     `json:"bans"`
 }
 
 var userMutexesLock sync.Mutex
@@ -557,6 +613,20 @@ func (u User) GetPassword() string {
 		}
 	}
 	return ""
+}
+
+func (u User) GetPassVersion() int {
+	v := u.Get("sys.passv")
+	switch val := v.(type) {
+	case int:
+		return val
+	case float64:
+		return int(val)
+	case int64:
+		return int(val)
+	default:
+		return 0
+	}
 }
 
 func (u User) GetSystem() string {
@@ -775,6 +845,23 @@ func (u User) GetRequests() []UserId {
 	out := make([]UserId, len(requests))
 	for i, r := range requests {
 		out[i] = UserId(r)
+	}
+	return out
+}
+
+func (u User) GetOutgoingRequests() []Username {
+	myId := u.GetId()
+	myName := u.GetUsername().ToLower()
+	usersMutex.RLock()
+	defer usersMutex.RUnlock()
+	out := make([]Username, 0)
+	for _, other := range users {
+		if other.GetId() == myId {
+			continue
+		}
+		if other.HasRequest(myName) {
+			out = append(out, other.GetUsername())
+		}
 	}
 	return out
 }
@@ -1010,12 +1097,16 @@ func (u User) SetSubscription(sub subscription) {
 		"tier":         sub.Tier,
 		"next_billing": sub.Next_billing,
 	})
-	u.Set("max_size", u.GetMaxSize())
+	if u.Get("max_size") != u.GetMaxSize() {
+		u.Set("max_size", u.GetMaxSize())
+	}
 }
 
 func (u User) GetMaxSize() string {
 	amt := strconv.Itoa(u.GetSubscriptionBenefits().FileSystem_Size)
-	u.Set("max_size", amt)
+	if u.Get("max_size") != amt {
+		u.Set("max_size", amt)
+	}
 	return amt
 }
 
@@ -1436,6 +1527,49 @@ type GiftPublic struct {
 	Note      string   `json:"note"`
 	CreatorId Username `json:"creator_id"`
 	ExpiresAt int64    `json:"expires_at"`
+}
+
+type CosmeticGift struct {
+	Id         string  `json:"id"`
+	CosmeticId string  `json:"cosmetic_id"`
+	FromUserId UserId  `json:"from_user_id"`
+	ToUserId   UserId  `json:"to_user_id"`
+	Note       string  `json:"note"`
+	Amount     float64 `json:"amount"` // price paid by sender
+	CreatedAt  int64   `json:"created_at"`
+	ClaimedAt  *int64  `json:"claimed_at,omitempty"`
+}
+
+type CosmeticGiftNet struct {
+	Id           string   `json:"id"`
+	CosmeticId   string   `json:"cosmetic_id"`
+	CosmeticName string   `json:"cosmetic_name"`
+	From         Username `json:"from"`
+	To           Username `json:"to"`
+	Note         string   `json:"note"`
+	Amount       float64  `json:"amount"`
+	CreatedAt    int64    `json:"created_at"`
+	ClaimedAt    *int64   `json:"claimed_at,omitempty"`
+}
+
+func (g CosmeticGift) ToNet() CosmeticGiftNet {
+	var cosmeticName string
+	if entry, ok := getCatalogEntryById(g.CosmeticId); ok {
+		cosmeticName = entry.Name
+	} else {
+		cosmeticName = g.CosmeticId
+	}
+	return CosmeticGiftNet{
+		Id:           g.Id,
+		CosmeticId:   g.CosmeticId,
+		CosmeticName: cosmeticName,
+		From:         g.FromUserId.User().GetUsername(),
+		To:           g.ToUserId.User().GetUsername(),
+		Note:         g.Note,
+		Amount:       g.Amount,
+		CreatedAt:    g.CreatedAt,
+		ClaimedAt:    g.ClaimedAt,
+	}
 }
 
 func (t Transaction) ToNet() TransactionNet {
@@ -1924,7 +2058,9 @@ var (
 	gifts      []Gift
 	giftsMutex sync.RWMutex
 
-	derogatoryTerms = make([]string, 0)
+	derogatoryTerms    = make([]string, 0)
+	cosmeticGifts      []CosmeticGift
+	cosmeticGiftsMutex sync.RWMutex
 )
 
 // UnmarshalJSON custom unmarshaler to handle timestamp as string or number

@@ -42,12 +42,13 @@ type profileResp struct {
 	Followed     bool           `json:"followed,omitempty"`
 	FollowsMe    bool           `json:"follows_me,omitempty"`
 	Id           UserId         `json:"id"`
+	GroupTag     string         `json:"group_tag,omitempty"`
 }
 
 func renderBioRegex(bio string, profile User, otherKeys profileResp) string {
 	safeProfile := map[string]string{}
 	for k, v := range profile {
-		if k == "key" || k == "password" {
+		if k == "key" || k == "password" || k == "sys.salt" {
 			continue
 		}
 		switch val := v.(type) {
@@ -323,12 +324,27 @@ func getProfile(c *gin.Context) {
 		Badges:       calculatedBadges,
 		Subscription: sub,
 		Theme:        foundUser.GetTheme(),
-		MaxSize:      maxSizeStr,
-		Currency:     foundUser.GetCredits(),
-		Index:        userIndex + 1,
-		Private:      foundUser.IsPrivate(),
-		Status:       st,
-		Id:           foundUser.GetId(),
+		GroupTag: func() string {
+			if gid, ok := foundUser["sys.group"]; ok {
+				if id, ok := gid.(string); ok && id != "" {
+					groupsDataMutex.RLock()
+					for tag, data := range groupsData {
+						if string(data.Group.Id) == id {
+							groupsDataMutex.RUnlock()
+							return tag
+						}
+					}
+					groupsDataMutex.RUnlock()
+				}
+			}
+			return ""
+		}(),
+		MaxSize:  maxSizeStr,
+		Currency: foundUser.GetCredits(),
+		Index:    userIndex + 1,
+		Private:  foundUser.IsPrivate(),
+		Status:   st,
+		Id:       foundUser.GetId(),
 	}
 
 	benefits := foundUser.GetSubscriptionBenefits()
@@ -407,6 +423,9 @@ func getSupporters(c *gin.Context) {
 		subscriptionName := user.GetSubscription().Tier
 		if subscriptionName == "Free" {
 			continue
+		}
+		if subscriptionName == "Drive" {
+			subscriptionName = "Pro"
 		}
 		supporters = append(supporters, resp{
 			Username:     user.GetUsername(),

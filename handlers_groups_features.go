@@ -57,6 +57,26 @@ func createAnnouncement(c *gin.Context) {
 	}
 
 	addGroupAnnouncement(groupTag, announcement)
+	// Send push notifications to group members
+	go func() {
+		members := getGroupMembers(groupTag)
+		for _, member := range members {
+			if member.UserId == user.GetId() {
+				continue
+			}
+			if member.MutedAnnouncements {
+				continue
+			}
+			targetUser := member.UserId.User()
+			if isNotifyAllowed(targetUser, "group_"+groupTag, user.GetId()) {
+				sendPushNotificationToUser(targetUser, *user, NotificationRequest{
+					Source: "group_" + groupTag,
+					Title: "[" + groupTag + "] " + title,
+					Body: body,
+				})
+			}
+		}
+	}()
 
 	c.JSON(201, announcement)
 }
@@ -82,11 +102,11 @@ func getAnnouncements(c *gin.Context) {
 
 	announcements := getGroupAnnouncements(groupTag)
 
-	var results []GroupAnnouncement
+	var results []GroupAnnouncementNet
 	count := 0
 	for i := len(announcements) - 1; i >= 0 && count < limit; i-- {
 		if announcements[i].GroupTag == groupTag {
-			results = append(results, announcements[i])
+			results = append(results, announcements[i].ToNet())
 			count++
 		}
 	}
@@ -263,15 +283,15 @@ func getEvents(c *gin.Context) {
 		}
 	}
 
-	var results []GroupEvent
+	var results []GroupEventNet
 	for _, event := range events {
 		if event.GroupTag == groupTag {
 			switch event.Visibility {
 			case EventVisibilityPublic:
-				results = append(results, event)
+				results = append(results, event.ToNet())
 			case EventVisibilityMembers:
 				if isMember {
-					results = append(results, event)
+				results = append(results, event.ToNet())
 				}
 			}
 		}
@@ -367,11 +387,107 @@ func getTips(c *gin.Context) {
 
 	tips := getGroupTips(groupTag)
 
-	var results []GroupTip
+	var results []GroupTipNet
 	count := 0
 	for i := len(tips) - 1; i >= 0 && count < limit; i-- {
 		if tips[i].GroupTag == groupTag {
-			results = append(results, tips[i])
+			results = append(results, tips[i].ToNet())
+			count++
+		}
+	}
+
+	c.JSON(200, results)
+}
+
+func withdrawTip(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+	groupTag := c.Param("grouptag")
+	if groupTag == "" {
+		c.JSON(400, gin.H{"error": "Group tag is required"})
+		return
+	}
+
+	amountStr := c.Query("amount")
+	amount, err := strconv.ParseFloat(amountStr, 64)
+	if err != nil || amount <= 0 {
+		c.JSON(400, gin.H{"error": "Invalid amount"})
+		return
+	}
+
+	group, ok := getGroupByTag(groupTag)
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	if !hasPermission(user.GetId(), groupTag, "groups.tips.withdraw") {
+		c.JSON(403, gin.H{"error": "You don't have permission to withdraw from the group tip jar"})
+		return
+	}
+
+	nAmount := roundVal(amount)
+
+	if nAmount > group.CreditsBalance {
+		c.JSON(400, gin.H{"error": "Insufficient funds in group tip jar", "required": nAmount, "available": group.CreditsBalance})
+		return
+	}
+
+	// Credit the user's balance
+	userCredits := user.GetCredits()
+	user.SetBalance(roundVal(userCredits + nAmount))
+	user.addTransaction(Transaction{
+		Note:     "Withdrawal from group " + groupTag + " tip jar",
+		User:     UserId(""),
+		Amount:   nAmount,
+		Type:     "group_tip_withdrawal",
+		Timestamp: time.Now().UnixMilli(),
+		NewTotal: roundVal(userCredits + nAmount),
+	})
+
+	withdrawal := GroupTipWithdrawal{
+		Id:            uuid.New().String(),
+		GroupTag:      groupTag,
+		ToUserId:      user.GetId(),
+		AmountCredits: nAmount,
+		CreatedAt:     time.Now().Unix(),
+	}
+
+	addGroupWithdrawal(groupTag, withdrawal)
+	go saveUsers()
+
+	c.JSON(201, withdrawal.ToNet())
+}
+
+func getWithdrawals(c *gin.Context) {
+	groupTag := c.Param("grouptag")
+	if groupTag == "" {
+		c.JSON(400, gin.H{"error": "Group tag is required"})
+		return
+	}
+
+	_, ok := getGroupByTag(groupTag)
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	if !hasPermission(c.MustGet("user").(*User).GetId(), groupTag, "groups.tips.withdraw") {
+		c.JSON(403, gin.H{"error": "You don't have permission to view withdrawals"})
+		return
+	}
+
+	limitStr := c.DefaultQuery("limit", "20")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 20
+	}
+
+	withdrawals := loadGroupWithdrawals(groupTag)
+	var results []GroupTipWithdrawalNet
+	count := 0
+	for i := len(withdrawals) - 1; i >= 0 && count < limit; i-- {
+		if withdrawals[i].GroupTag == groupTag {
+			results = append(results, withdrawals[i].ToNet())
 			count++
 		}
 	}
@@ -455,7 +571,14 @@ func getRoles(c *gin.Context) {
 	var results []GroupRole
 	for _, role := range roles {
 		if role.GroupTag == groupTag {
-			results = append(results, role)
+			// Owner role always returns all permissions dynamically
+			if role.Name == "Owner" {
+				ownerRole := role
+				ownerRole.Permissions = allGroupPermissions()
+				results = append(results, ownerRole)
+			} else {
+				results = append(results, role)
+			}
 		}
 	}
 
@@ -576,6 +699,39 @@ func deleteRole(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "Role deleted"})
 }
 
+// allGroupPermissions returns the canonical list of all group-level permissions.
+// The Owner role is always granted every permission in this list dynamically.
+func allGroupPermissions() []string {
+	return []string{
+		"groups.manage",
+		"groups.members.invite",
+		"groups.members.remove",
+		"groups.members.ban",
+		"groups.members.view",
+		"groups.roles.manage",
+		"groups.roles.assign",
+		"groups.announcements.send",
+		"groups.events.manage",
+		"groups.events.publish",
+		"groups.tips.manage",
+		"groups.tips.withdraw",
+		"groups.tips.deposit",
+		"groups.group.edit",
+	}
+}
+
+// isOwnerRole checks whether any of the given role IDs correspond to the
+// Owner role in the specified group.
+func isOwnerRole(groupTag string, roleIds []string) bool {
+	rolesMap := getGroupRolesMap(groupTag)
+	for _, roleId := range roleIds {
+		if role, ok := rolesMap[roleId]; ok && role.Name == "Owner" {
+			return true
+		}
+	}
+	return false
+}
+
 func getUserPermissions(c *gin.Context) {
 	groupTag := c.Param("grouptag")
 	targetUserId := c.Param("userid")
@@ -605,6 +761,12 @@ func getUserPermissions(c *gin.Context) {
 
 	if !found {
 		c.JSON(404, gin.H{"error": "User is not a member of this group"})
+		return
+	}
+
+	// Owner role always has all permissions dynamically
+	if isOwnerRole(groupTag, member.RoleIds) {
+		c.JSON(200, gin.H{"permissions": allGroupPermissions()})
 		return
 	}
 
@@ -665,7 +827,14 @@ func getUserRoles(c *gin.Context) {
 	var roles []GroupRole
 	for _, roleId := range member.RoleIds {
 		if role, roleExists := rolesMap[roleId]; roleExists {
-			roles = append(roles, role)
+			// Owner role always returns all permissions dynamically
+			if role.Name == "Owner" {
+				ownerRole := role
+				ownerRole.Permissions = allGroupPermissions()
+				roles = append(roles, ownerRole)
+			} else {
+				roles = append(roles, role)
+			}
 		}
 	}
 

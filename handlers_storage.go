@@ -90,7 +90,6 @@ func loadUsers() {
 func loadGroupData() {
 	groupsDataMutex.Lock()
 	defer groupsDataMutex.Unlock()
-
 	if _, err := os.Stat(GROUPS_FILE_PATH); os.IsNotExist(err) {
 		err = os.MkdirAll(GROUPS_FILE_PATH, 0755)
 		if err != nil {
@@ -101,62 +100,70 @@ func loadGroupData() {
 		groupsData = make(map[string]*GroupData)
 		return
 	}
-
 	entries, err := os.ReadDir(GROUPS_FILE_PATH)
 	if err != nil {
 		log.Printf("Error reading groups directory: %v", err)
 		groupsData = make(map[string]*GroupData)
 		return
 	}
-
 	groupsData = make(map[string]*GroupData)
 	loadedCount := 0
-
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if !entry.IsDir() {
 			continue
 		}
-
-		if filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-
-		tag := entry.Name()[:len(entry.Name())-5]
-
-		filePath := filepath.Join(GROUPS_FILE_PATH, entry.Name())
-		data, err := os.ReadFile(filePath)
+		groupJsonPath := filepath.Join(GROUPS_FILE_PATH, entry.Name(), "group.json")
+		data, err := os.ReadFile(groupJsonPath)
 		if err != nil {
-			log.Printf("Error reading group file %s: %v", entry.Name(), err)
+			log.Printf("Error reading group file %s: %v", groupJsonPath, err)
 			continue
 		}
-
 		var groupData GroupData
 		if err := json.Unmarshal(data, &groupData); err != nil {
-			log.Printf("Error unmarshaling group data from %s: %v", entry.Name(), err)
+			log.Printf("Error unmarshaling group data from %s: %v", groupJsonPath, err)
 			continue
 		}
-
+		// Load tips from separate file and compute credits balance
+		tipsPath := filepath.Join(GROUPS_FILE_PATH, entry.Name(), "tips.json")
+		tipsData, err := os.ReadFile(tipsPath)
+		if err == nil {
+			var tips []GroupTip
+			if json.Unmarshal(tipsData, &tips) == nil {
+				groupData.Group.CreditsBalance = 0
+				for _, tip := range tips {
+					groupData.Group.CreditsBalance += tip.AmountCredits
+				}
+			}
+		}
+		tag := groupData.Group.Tag
+		if groupData.Invites == nil {
+			groupData.Invites = []GroupInvite{}
+		}
+		if groupData.JoinRequests == nil {
+			groupData.JoinRequests = []GroupJoinRequest{}
+		}
+		if groupData.Bans == nil {
+			groupData.Bans = []GroupBan{}
+		}
 		groupsData[tag] = &groupData
 		loadedCount++
 	}
-
 	log.Printf("Loaded %d groups", loadedCount)
 }
 
 func saveGroupFile(groupTag string, groupData *GroupData) {
-	path := filepath.Join(GROUPS_FILE_PATH, groupTag+".json")
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		log.Printf("Error creating groups directory: %v", err)
+	dirPath := groupDirPath(groupTag)
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		log.Printf("Error creating group directory for %s: %v", groupTag, err)
 		return
 	}
-
-	data, err := json.MarshalIndent(groupData, "", "  ")
+	mainPath := filepath.Join(dirPath, "group.json")
+	data, err := json.MarshalIndent(groupData, "", " ")
 	if err != nil {
 		log.Printf("Error marshaling group data for %s: %v", groupTag, err)
 		return
 	}
-
-	if err := atomicWrite(path, data, 0644); err != nil {
+	if err := atomicWrite(mainPath, data, 0644); err != nil {
 		log.Printf("Error saving group data for %s: %v", groupTag, err)
 	}
 }
@@ -171,8 +178,8 @@ func saveGroupData(groupTag string) {
 }
 
 func deleteGroupData(groupTag string) {
-	filePath := filepath.Join(GROUPS_FILE_PATH, groupTag+".json")
-	os.Remove(filePath)
+	dirPath := groupDirPath(groupTag)
+	os.RemoveAll(dirPath)
 }
 
 func atomicWrite(path string, data []byte, perm os.FileMode) error {

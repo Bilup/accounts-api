@@ -25,6 +25,7 @@ func main() {
 	loadEventsHistory()
 	loadGifts()
 	loadCosmeticsCatalog()
+	loadCosmeticGifts()
 	buildSubTokenIndex()
 	// doAfter(reconnectFriends, nil, time.Second*20)
 
@@ -157,6 +158,8 @@ func main() {
 	auth := r.Group("/auth")
 	{
 		auth.POST("/rotur", rateLimit("register"), registerUser)
+		auth.POST("/reset_password", rateLimit("register"), resetPasswordHandler)
+		auth.POST("/request_reset", rateLimit("register"), requestPasswordResetHandler)
 	}
 
 	me := r.Group("/me")
@@ -164,6 +167,7 @@ func main() {
 		me.POST("/update", updateUser)
 		me.GET("/benefits", requiresAuth, requirePermission(PermViewProfile), getUserSubscriptionBenefits)
 
+		me.POST("/change_password", requiresAuth, requireMainToken(), changePasswordHandler)
 		me.POST("/refresh_token", requiresAuth, requireMainToken(), refreshToken)
 		me.POST("/transfer", requiresAuth, requirePermission(PermTransferCredits), transferCredits)
 		me.POST("/gamble", requiresAuth, requirePermission(PermManageCredits), gambleCredits)
@@ -192,7 +196,7 @@ func main() {
 		groups.POST("/:grouptag/report", requiresAuth, requirePermission(PermViewGroups), reportGroup)
 		groups.POST("/:grouptag/join", requiresAuth, requirePermission(PermJoinGroup), joinGroup)
 		groups.POST("/:grouptag/leave", requiresAuth, requirePermission(PermLeaveGroup), leaveGroup)
-		groups.GET("/:grouptag", requiresAuth, requirePermission(PermViewGroups), getGroup)
+		groups.GET("/:grouptag", getGroup)
 		groups.PATCH("/:grouptag", requiresAuth, requirePermission(PermManageGroups), updateGroup)
 		groups.DELETE("/:grouptag", requiresAuth, requirePermission(PermManageGroups), deleteGroup)
 
@@ -206,17 +210,42 @@ func main() {
 
 		groups.GET("/:grouptag/tips", requiresAuth, requirePermission(PermViewGroups), getTips)
 		groups.POST("/:grouptag/tips", requiresAuth, requirePermission(PermManageCredits), sendTip)
+		groups.POST("/:grouptag/tips/withdraw", requiresAuth, requirePermission(PermManageCredits), withdrawTip)
+		groups.GET("/:grouptag/tips/withdrawals", requiresAuth, requirePermission(PermViewGroups), getWithdrawals)
 
 		groups.GET("/:grouptag/roles", requiresAuth, requirePermission(PermViewGroups), getRoles)
 		groups.POST("/:grouptag/roles", requiresAuth, requirePermission(PermManageGroups), createRole)
 		groups.PATCH("/:grouptag/roles/:roleid", requiresAuth, requirePermission(PermManageGroups), updateRole)
 		groups.DELETE("/:grouptag/roles/:roleid", requiresAuth, requirePermission(PermManageGroups), deleteRole)
 
+		groups.GET("/:grouptag/members", requiresAuth, requirePermission(PermViewGroupMembers), getGroupMembersList)
+		groups.GET("/:grouptag/members/:userid", requiresAuth, requirePermission(PermViewGroupMembers), getGroupMemberInfo)
+		groups.DELETE("/:grouptag/members/:userid", requiresAuth, requirePermission(PermManageGroups), kickGroupMember)
+		groups.POST("/:grouptag/members/:userid/ban", requiresAuth, requirePermission(PermManageGroups), banGroupMember)
+		groups.DELETE("/:grouptag/members/:userid/ban", requiresAuth, requirePermission(PermManageGroups), unbanGroupMember)
+		groups.GET("/:grouptag/bans", requiresAuth, requirePermission(PermManageGroups), getGroupBans)
+		groups.GET("/:grouptag/bans/:userid", requiresAuth, requirePermission(PermViewGroupMembers), checkGroupBan)
 		groups.GET("/:grouptag/members/:userid/roles", requiresAuth, requirePermission(PermViewGroups), getUserRoles)
 		groups.GET("/:grouptag/members/:userid/permissions", requiresAuth, requirePermission(PermViewGroups), getUserPermissions)
 		groups.GET("/:grouptag/members/:userid/benefits", requiresAuth, requirePermission(PermViewGroups), getUserBenefits)
 		groups.POST("/:grouptag/members/:userid/roles/:roleid", requiresAuth, requirePermission(PermManageGroups), assignRole)
 		groups.DELETE("/:grouptag/members/:userid/roles/:roleid", requiresAuth, requirePermission(PermManageGroups), removeRole)
+		groups.GET("/invites/mine", requiresAuth, requirePermission(PermViewGroups), getMyGroupInvites)
+		groups.GET("/:grouptag/invites", requiresAuth, requirePermission(PermInviteGroup), getGroupInvites)
+		groups.POST("/:grouptag/invites", requiresAuth, requirePermission(PermInviteGroup), sendGroupInvite)
+		groups.POST("/:grouptag/invites/:inviteid/accept", requiresAuth, requirePermission(PermJoinGroup), acceptGroupInvite)
+		groups.POST("/:grouptag/invites/:inviteid/decline", requiresAuth, requirePermission(PermJoinGroup), declineGroupInvite)
+		groups.DELETE("/:grouptag/invites/:inviteid", requiresAuth, requirePermission(PermInviteGroup), revokeGroupInvite)
+		groups.GET("/:grouptag/join_requests", requiresAuth, requirePermission(PermInviteGroup), getGroupJoinRequests)
+		groups.POST("/:grouptag/join_requests", requiresAuth, requirePermission(PermJoinGroup), requestToJoinGroup)
+		groups.POST("/:grouptag/join_requests/:requestid/accept", requiresAuth, requirePermission(PermInviteGroup), acceptGroupJoinRequest)
+		groups.POST("/:grouptag/join_requests/:requestid/decline", requiresAuth, requirePermission(PermInviteGroup), declineGroupJoinRequest)
+		groups.POST("/:grouptag/transfer/:userid", requiresAuth, requirePermission(PermManageGroups), transferGroupOwnership)
+		groups.GET("/top", getTopGroups)
+		groups.POST("/:grouptag/icon", requiresAuth, requirePermission(PermManageGroups), uploadGroupIcon)
+		groups.GET("/:grouptag/icon.jpg", getGroupIcon)
+		groups.POST("/:grouptag/banner", requiresAuth, requirePermission(PermManageGroups), uploadGroupBanner)
+		groups.GET("/:grouptag/banner", getGroupBanner)
 	}
 	r.POST("/accept_tos", requiresAuth, requirePermission(PermManageSettings), acceptTos)
 
@@ -249,7 +278,9 @@ func main() {
 	// Friends endpoints
 	friends := r.Group("/friends")
 	{
-		friends.GET("", requiresAuth, requirePermission(PermViewFriends), getFriends)
+		friends.GET("", requiresAuth, requirePermission(PermViewFriends), getMeFriends)
+		friends.GET("/requests", requiresAuth, requirePermission(PermViewFriends), getMeRequests)
+		friends.GET("/requests_out", requiresAuth, requirePermission(PermViewFriends), getMeRequestsOut)
 		friends.POST("/request/:username", requiresAuth, requirePermission(PermSendFriendReq), requireStanding(StandingGood), sendFriendRequest)
 		friends.POST("/accept/:username", requiresAuth, requirePermission(PermAcceptFriend), acceptFriendRequest)
 		friends.POST("/reject/:username", requiresAuth, requirePermission(PermAcceptFriend), rejectFriendRequest)
@@ -341,6 +372,8 @@ func main() {
 		cosmetics.POST("/purchase/:id", rateLimit("default"), requiresAuth, requirePermission(PermBuyCosmetics), requireStanding(StandingWarning), purchaseCosmetic)
 		cosmetics.POST("/equip/:id", requiresAuth, requirePermission(PermEquipCosmetics), equipCosmetic)
 		cosmetics.POST("/unequip", requiresAuth, requirePermission(PermEquipCosmetics), unequipCosmetic)
+		cosmetics.POST("/gift", rateLimit("default"), requiresAuth, requirePermission(PermGiftCosmetics), requireStanding(StandingGood), giftCosmetic)
+		cosmetics.GET("/gifts/mine", requiresAuth, requirePermission(PermViewCosmetics), getMyCosmeticGifts)
 		cosmetics.GET("/overlays/*filepath", rateLimit("default"), serveOverlayAsset)
 		cosmetics.GET("/admin/list", rateLimit("default"), adminListCosmetics)
 		cosmetics.POST("/admin/create", rateLimit("default"), adminCreateCosmetic)

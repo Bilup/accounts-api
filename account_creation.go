@@ -11,11 +11,10 @@ import (
 )
 
 type AccountCreateInput struct {
-	Username Username
-	Password string
-	Email    string
-	System   System
-
+	Username      Username
+	Password      string
+	Email         string
+	System        System
 	Provider      string
 	RequestIP     string
 	RequestOrigin string
@@ -53,6 +52,7 @@ func createAccount(in AccountCreateInput) (User, error) {
 		}
 	}
 	usersMutex.RUnlock()
+
 	if usernameExists {
 		return nil, fmt.Errorf("username already in use")
 	}
@@ -72,20 +72,20 @@ func createAccount(in AccountCreateInput) (User, error) {
 	if origin == "" {
 		origin = "unknown"
 	}
+
 	go sendDiscordWebhook([]map[string]any{
 		{
-			"title": "New Account Registered",
-			"description": fmt.Sprintf("**Username:** %s\n**Email:** %s\n**System:** %s\n**Provider:** %s\n**IP:** %s\n**Host:** %s",
-				in.Username, in.Email, in.System.Name, provider, hash, origin),
-			"color":     0x57cdac,
-			"timestamp": time.Now().Format(time.RFC3339),
+			"title":       "New Account Registered",
+			"description": fmt.Sprintf("**Username:** %s\n**Email:** %s\n**System:** %s\n**Provider:** %s\n**IP:** %s\n**Host:** %s", in.Username, in.Email, in.System.Name, provider, hash, origin),
+			"color":       0x57cdac,
+			"timestamp":   time.Now().Format(time.RFC3339),
 		},
 	})
 
 	newUser := User{
 		"username":         in.Username,
 		"pfp":              "https://avatars.rotur.dev/" + usernameLower,
-		"password":         in.Password,
+		"password":         "",
 		"email":            in.Email,
 		"key":              generateAccountToken(),
 		"system":           in.System.Name,
@@ -102,6 +102,7 @@ func createAccount(in AccountCreateInput) (User, error) {
 		"sys.purchases":    []any{},
 		"private":          false,
 		"sys.id":           uuid.New().String(),
+		"sys.passv":        1,
 		"theme": map[string]any{
 			"primary":    "#222",
 			"secondary":  "#555",
@@ -116,10 +117,10 @@ func createAccount(in AccountCreateInput) (User, error) {
 			"Origin/(A) System/Docks/Dock.osl",
 			"Origin/(A) System/System Apps/Quick_Settings.osl",
 		},
-		"created":          time.Now().UnixMilli(),
-		"wallpaper":        in.System.Wallpaper,
-		"sys.tos_accepted": false,
-		"sys.email_verified": false,
+		"created":                time.Now().UnixMilli(),
+		"wallpaper":              in.System.Wallpaper,
+		"sys.tos_accepted":       false,
+		"sys.email_verified":     false,
 		"sys.email_verify_token": "",
 	}
 
@@ -127,7 +128,16 @@ func createAccount(in AccountCreateInput) (User, error) {
 		maps.Copy(newUser, in.ExtraSys)
 	}
 
+	salt := getOrCreateSalt(newUser)
+	newUser["password"] = HashPBKDF2(in.Password, salt, PBKDF2_ITERATIONS)
+
 	users = append(users, newUser)
+	idx := len(users) - 1
+	idToUserMutex.Lock()
+	usernameToId[usernameLower] = newUser.GetId()
+	idToUser[newUser.GetId()] = newUser
+	keyToUserIdx[newUser.GetKey()] = idx
+	idToUserMutex.Unlock()
 	go saveUsers()
 	return newUser, nil
 }

@@ -112,17 +112,23 @@ func doAfter(fn func(any), data any, after time.Duration) {
 	}()
 }
 
-func hasTierOrHigher(tier string, required string) bool {
-	tier = strings.ToLower(tier)
-	switch strings.ToLower(required) {
-	case "max":
-		return tier == "max"
-	case "pro", "drive":
-		return tier == "drive" || tier == "pro" || tier == "max"
+func tierRank(tier string) int {
+	switch strings.ToLower(tier) {
 	case "lite":
-		return tier == "lite" || tier == "drive" || tier == "pro" || tier == "max"
+		return 1
+	case "plus":
+		return 2
+	case "drive", "pro":
+		return 3
+	case "max":
+		return 4
+	default:
+		return 0
 	}
-	return false
+}
+
+func hasTierOrHigher(tier, required string) bool {
+	return tierRank(tier) >= tierRank(required)
 }
 
 func hasRequiredStanding(current StandingLevel, required StandingLevel) bool {
@@ -742,6 +748,55 @@ func getGiftsByCreator(creatorId UserId) []Gift {
 	for _, gift := range gifts {
 		if gift.CreatorId == creatorId {
 			result = append(result, gift)
+		}
+	}
+	return result
+}
+
+func loadCosmeticGifts() {
+	if _, err := os.Stat("cosmetic_gifts.json"); os.IsNotExist(err) {
+		cosmeticGifts = []CosmeticGift{}
+		return
+	}
+	data, err := os.ReadFile("cosmetic_gifts.json")
+	if err != nil {
+		log.Printf("Error reading cosmetic_gifts.json: %v", err)
+		cosmeticGifts = []CosmeticGift{}
+		return
+	}
+	if err := json.Unmarshal(data, &cosmeticGifts); err != nil {
+		log.Printf("Error unmarshaling cosmetic_gifts.json: %v", err)
+		cosmeticGifts = []CosmeticGift{}
+		return
+	}
+	log.Printf("Loaded %d cosmetic gifts", len(cosmeticGifts))
+}
+
+func saveCosmeticGifts() {
+	cosmeticGiftsMutex.RLock()
+	defer cosmeticGiftsMutex.RUnlock()
+	saveJsonFile("cosmetic_gifts.json", cosmeticGifts)
+}
+
+func getCosmeticGiftsByRecipient(userId UserId) []CosmeticGift {
+	cosmeticGiftsMutex.RLock()
+	defer cosmeticGiftsMutex.RUnlock()
+	result := make([]CosmeticGift, 0)
+	for _, g := range cosmeticGifts {
+		if g.ToUserId == userId {
+			result = append(result, g)
+		}
+	}
+	return result
+}
+
+func getCosmeticGiftsBySender(userId UserId) []CosmeticGift {
+	cosmeticGiftsMutex.RLock()
+	defer cosmeticGiftsMutex.RUnlock()
+	result := make([]CosmeticGift, 0)
+	for _, g := range cosmeticGifts {
+		if g.FromUserId == userId {
+			result = append(result, g)
 		}
 	}
 	return result

@@ -42,7 +42,7 @@ func TestValidateUsername_MinLength(t *testing.T) {
 }
 
 func TestValidateUsername_MaxLength(t *testing.T) {
-	ok, msg := ValidateUsername("abcdefghijklmnopqrst") // 20 chars
+	ok, msg := ValidateUsername("abcdefghijklmnopqrst")
 	if !ok {
 		t.Errorf("20-char username should be valid, got: %s", msg)
 	}
@@ -106,8 +106,8 @@ func TestValidateUsername_NumbersAllowed(t *testing.T) {
 	}
 }
 
-func TestValidatePasswordHash_Empty(t *testing.T) {
-	ok, msg := ValidatePasswordHash("")
+func TestValidatePassword_Empty(t *testing.T) {
+	ok, msg := ValidatePassword("")
 	if ok {
 		t.Error("Empty password should be invalid")
 	}
@@ -116,61 +116,59 @@ func TestValidatePasswordHash_Empty(t *testing.T) {
 	}
 }
 
-func TestValidatePasswordHash_WrongLength(t *testing.T) {
-	ok, msg := ValidatePasswordHash("abc123")
+func TestValidatePassword_TooShort(t *testing.T) {
+	ok, msg := ValidatePassword("abc")
 	if ok {
-		t.Error("Short password hash should be invalid")
+		t.Error("Short password should be invalid")
 	}
 	if msg == "" {
-		t.Error("Should provide error message for wrong length")
+		t.Error("Should provide error message for short password")
 	}
 }
 
-func TestValidatePasswordHash_BlankMD5(t *testing.T) {
-	// The MD5 of an empty string: d41d8cd98f00b204e9800998ecf8427e
-	ok, msg := ValidatePasswordHash("d41d8cd98f00b204e9800998ecf8427e")
-	if ok {
-		t.Error("MD5 of empty string should be rejected")
+func TestValidatePassword_TooLong(t *testing.T) {
+	long := ""
+	for i := 0; i < 129; i++ {
+		long += "a"
 	}
-	if msg == "" {
-		t.Error("Should provide error message for empty password MD5")
+	ok, _ := ValidatePassword(long)
+	if ok {
+		t.Error("129-char password should be invalid")
 	}
 }
 
-func TestValidatePasswordHash_ValidMD5(t *testing.T) {
-	// A valid 32-char hex string that is not the empty-string MD5
-	ok, msg := ValidatePasswordHash("5d41402abc4b2a76b9719d911017c592")
+func TestValidatePassword_LooksLikeMD5(t *testing.T) {
+	ok, msg := ValidatePassword("5d41402abc4b2a76b9719d911017c592")
+	if ok {
+		t.Error("32-char hex string should be rejected as MD5-like")
+	}
+	if msg == "" {
+		t.Error("Should provide error message for MD5-like password")
+	}
+}
+
+func TestValidatePassword_Valid(t *testing.T) {
+	ok, msg := ValidatePassword("securepassword123")
 	if !ok {
-		t.Errorf("Valid MD5 hash should be accepted, got: %s", msg)
+		t.Errorf("Valid password should be accepted, got: %s", msg)
 	}
 }
 
-func TestValidatePasswordHash_InvalidHex(t *testing.T) {
-	ok, msg := ValidatePasswordHash("gggggggggggggggggggggggggggggggg") // 32 chars but not hex
-	if ok {
-		t.Error("Non-hex 32-char string should be invalid")
-	}
-	if msg == "" {
-		t.Error("Should provide error message for non-hex")
-	}
-}
-
-func TestValidatePasswordHash_UppercaseHex(t *testing.T) {
-	ok, msg := ValidatePasswordHash("5D41402ABC4B2A76B9719D911017C592")
+func TestValidatePassword_Exactly8Chars(t *testing.T) {
+	ok, msg := ValidatePassword("12345678")
 	if !ok {
-		t.Errorf("Uppercase hex should be accepted, got: %s", msg)
+		t.Errorf("8-char password should be valid, got: %s", msg)
 	}
 }
 
-func TestValidatePasswordHash_TooLong(t *testing.T) {
-	ok, _ := ValidatePasswordHash("5d41402abc4b2a76b9719d911017c592extra")
+func TestValidatePassword_7Chars(t *testing.T) {
+	ok, _ := ValidatePassword("1234567")
 	if ok {
-		t.Error("33-char string should be invalid")
+		t.Error("7-char password should be invalid")
 	}
 }
 
 func TestIsIpInBannedList_Empty(t *testing.T) {
-	// With no BANNED_IPS env, should return false
 	result := IsIpInBannedList("1.2.3.4")
 	if result {
 		t.Error("Should not match when BANNED_IPS is not set")

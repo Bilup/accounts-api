@@ -35,6 +35,8 @@ var (
 	DISCORD_WEBHOOK_URL           string
 	KEY_OWNERSHIP_CACHE_TTL       int
 	ADMIN_TOKEN                   string
+	PBKDF2_SALT                   string
+	PBKDF2_ITERATIONS             int
 
 	bannedDomains = []string{
 		"pornhub.com", "xvideos.com", "xnxx.com", "redtube.com", "youporn.com",
@@ -95,25 +97,26 @@ func loadConfigFromEnv() {
 	WEBSOCKET_SERVER_URL = mustEnv("WEBSOCKET_SERVER_URL", "")
 	EVENT_SERVER_URL = mustEnv("EVENT_SERVER_URL", "")
 	BANNED_WORDS_URL = mustEnv("BANNED_WORDS_URL", "")
+
 	BASE_URL = mustEnv("BASE_URL", "https://api.rotur.dev")
 	SMTP_HOST = mustEnv("SMTP_HOST", "")
 	SMTP_PORT = mustEnv("SMTP_PORT", "587")
 	SMTP_USER = mustEnv("SMTP_USER", "")
 	SMTP_PASS = mustEnv("SMTP_PASS", "")
 	SMTP_FROM = mustEnv("SMTP_FROM", "")
+
 	DISCORD_WEBHOOK_URL = mustEnv("DISCORD_WEBHOOK_URL", "")
 
-	// Numeric settings
 	SUBSCRIPTION_CHECK_INTERVAL = intEnv("SUBSCRIPTION_CHECK_INTERVAL", 3600)
 	INACTIVITY_TAX_CHECK_INTERVAL = intEnv("INACTIVITY_TAX_CHECK_INTERVAL", 3600)
 	KEY_OWNERSHIP_CACHE_TTL = intEnv("KEY_OWNERSHIP_CACHE_TTL", 600)
 
-	// Auth / admin tokens
 	ADMIN_TOKEN = mustEnv("ADMIN_TOKEN", "")
+	PBKDF2_SALT = mustEnv("PBKDF2_SALT", "")
+	PBKDF2_ITERATIONS = intEnv("PBKDF2_ITERATIONS", 600000)
 }
 
 func init() {
 	loadConfigFromEnv()
-
 	groupsData = make(map[string]*GroupData)
 }

@@ -17,12 +17,19 @@ func TestGenerateToken(t *testing.T) {
 
 func TestGenerateTokenUniqueness(t *testing.T) {
 	seen := make(map[string]bool)
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		token := generateToken()
 		if seen[token] {
 			t.Fatalf("Duplicate token generated: %s", token)
 		}
 		seen[token] = true
+	}
+}
+
+func TestMd5Hex(t *testing.T) {
+	hex1234 := md5Hex("1234")
+	if hex1234 != "81dc9bdb52d04dc20036dbd8313ed055" {
+		t.Errorf("md5Hex(\"1234\") = %q, want %q", hex1234, "81dc9bdb52d04dc20036dbd8313ed055")
 	}
 }
 
@@ -38,7 +45,7 @@ func TestGenerateShortToken(t *testing.T) {
 
 func TestGenerateShortTokenUniqueness(t *testing.T) {
 	seen := make(map[string]bool)
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		token := generateShortToken()
 		if seen[token] {
 			t.Fatalf("Duplicate short token generated: %s", token)
