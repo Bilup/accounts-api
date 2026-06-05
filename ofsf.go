@@ -911,7 +911,7 @@ func (fs *FileSystem) migrateFromLegacy(username Username) error {
 	legacyPath := filepath.Join(fileDir, string(username)+".ofsf")
 
 	newPath := filepath.Join(fileDir, string(username))
-	if dirExists(newPath) {
+	if info, err := os.Stat(newPath); err == nil && info.IsDir() {
 		return nil
 	}
 	if !fileExists(legacyPath) {

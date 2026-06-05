@@ -7,15 +7,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// helper to normalize and validate monetary amounts (minimum 0.01, 2 decimal places)
-func normalizeEscrowAmount(raw float64) (float64, bool) {
-	amt := roundVal(raw)
-	if amt < 0.01 {
-		return 0, false
-	}
-	return amt, true
-}
-
 // escrowTransfer - Transfer credits to escrow (no tax for internal transfers)
 func escrowTransfer(c *gin.Context) {
 	user := c.MustGet("user").(*User)

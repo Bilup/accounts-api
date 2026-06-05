@@ -22,13 +22,12 @@ func generateUniqueLinkCode() string {
 		code := strings.ToUpper(fmt.Sprintf("%x", hash)[:6])
 
 		usedCodesMutex.Lock()
-		defer usedCodesMutex.Unlock()
 		if _, exists := usedCodes[code]; !exists {
 			usedCodes[code] = ""
+			usedCodesMutex.Unlock()
 			return code
 		}
-
-		time.Sleep(time.Nanosecond)
+		usedCodesMutex.Unlock()
 	}
 }
 

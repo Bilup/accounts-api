@@ -250,7 +250,7 @@ func updateKey(c *gin.Context) {
 	}
 
 	var parsedData any
-	if isValidJSON(data) {
+	if json.Valid([]byte(data)) {
 		json.Unmarshal([]byte(data), &parsedData)
 	} else {
 		parsedData = data

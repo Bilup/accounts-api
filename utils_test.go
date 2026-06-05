@@ -212,9 +212,10 @@ func TestHasRequiredStanding(t *testing.T) {
 		{StandingBanned, StandingBanned, true},
 	}
 	for _, tt := range tests {
-		got := hasRequiredStanding(tt.current, tt.required)
+		u := User{"sys.standing": string(tt.current)}
+		got := u.HasStandingOrHigher(tt.required)
 		if got != tt.expected {
-			t.Errorf("hasRequiredStanding(%q, %q) = %v, want %v", tt.current, tt.required, got, tt.expected)
+			t.Errorf("HasStandingOrHigher(%q, %q) = %v, want %v", tt.current, tt.required, got, tt.expected)
 		}
 	}
 }
@@ -246,27 +247,6 @@ func TestJSONStringify(t *testing.T) {
 	}
 	if got := JSONStringify(42); got != `42` {
 		t.Errorf("JSONStringify(int) = %q, want %q", got, `42`)
-	}
-}
-
-func TestIsValidJSON(t *testing.T) {
-	if !isValidJSON(`{"key": "value"}`) {
-		t.Error("isValidJSON should return true for valid JSON object")
-	}
-	if !isValidJSON(`[1, 2, 3]`) {
-		t.Error("isValidJSON should return true for valid JSON array")
-	}
-	if !isValidJSON(`"hello"`) {
-		t.Error("isValidJSON should return true for valid JSON string")
-	}
-	if !isValidJSON(`null`) {
-		t.Error("isValidJSON should return true for null")
-	}
-	if isValidJSON(`{invalid`) {
-		t.Error("isValidJSON should return false for invalid JSON")
-	}
-	if isValidJSON(``) {
-		t.Error("isValidJSON should return false for empty string")
 	}
 }
 

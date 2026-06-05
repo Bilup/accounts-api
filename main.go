@@ -27,7 +27,6 @@ func main() {
 	loadCosmeticsCatalog()
 	loadCosmeticGifts()
 	buildSubTokenIndex()
-	// doAfter(reconnectFriends, nil, time.Second*20)
 
 	if err := loadJSONBadges(); err != nil {
 		log.Printf("Warning: Failed to load badges.json: %v", err)
@@ -41,7 +40,6 @@ func main() {
 	go watchBadgesFile()
 	go cleanExpiredGifts()
 	go cleanExpiredSubTokens()
-	// go enactInactivityTax()
 	go startStandingRecoveryChecker()
 
 	gin.SetMode(gin.ReleaseMode)

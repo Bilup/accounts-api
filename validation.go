@@ -3,10 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 var (
@@ -19,17 +23,36 @@ var (
 func loadBannedWordsLocal() ([]string, error) {
 	bannedWordsOnce.Do(func() {
 		file, err := os.Open("./banned_words.json")
-		if err != nil {
-			bannedWordsErr = fmt.Errorf("error opening banned_words.json: %w", err)
-			return
+		if err == nil {
+			defer file.Close()
+			var words []string
+			if err := json.NewDecoder(file).Decode(&words); err == nil {
+				bannedWords = words
+			}
 		}
-		defer file.Close()
-		var words []string
-		if err := json.NewDecoder(file).Decode(&words); err != nil {
-			bannedWordsErr = fmt.Errorf("error decoding banned_words.json: %w", err)
-			return
+
+		if BANNED_WORDS_URL != "" {
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Get(BANNED_WORDS_URL)
+			if err == nil {
+				defer resp.Body.Close()
+				if resp.StatusCode == 200 {
+					body, err := io.ReadAll(resp.Body)
+					if err == nil {
+						for _, word := range strings.Split(string(body), "\n") {
+							word = strings.TrimSpace(word)
+							if word != "" && !slices.Contains(bannedWords, word) {
+								bannedWords = append(bannedWords, word)
+							}
+						}
+					}
+				}
+			}
 		}
-		bannedWords = words
+
+		if len(bannedWords) == 0 && bannedWordsErr == nil {
+			bannedWordsErr = fmt.Errorf("no banned words loaded")
+		}
 	})
 	return bannedWords, bannedWordsErr
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -66,7 +65,3 @@ func getStringSlice(u User, key string) []string {
 	return []string{}
 }
 
-func isValidJSON(s string) bool {
-	var js any
-	return json.Unmarshal([]byte(s), &js) == nil
-}

@@ -71,22 +71,23 @@ func getKeyNextBilling(userId UserId, key string) int64 {
 	}
 }
 
+func extractAdminToken(authHeader string) string {
+	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+		return authHeader[len("bearer "):]
+	}
+	if authHeader != "" {
+		return authHeader
+	}
+	return ""
+}
+
 func isAdmin(c *gin.Context) bool {
 	envOnce.Do(loadEnvFile)
 	ADMIN_TOKEN := os.Getenv("ADMIN_TOKEN")
 	if ADMIN_TOKEN == "" {
 		return false
 	}
-
-	authHeader := c.GetHeader("Authorization")
-	var adminToken string
-	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-		adminToken = authHeader[7:]
-	} else if authHeader != "" {
-		adminToken = authHeader
-	}
-
-	return adminToken == ADMIN_TOKEN
+	return extractAdminToken(c.GetHeader("Authorization")) == ADMIN_TOKEN
 }
 
 func authenticateAdmin(c *gin.Context) bool {
@@ -96,19 +97,9 @@ func authenticateAdmin(c *gin.Context) bool {
 		c.JSON(500, gin.H{"error": "ADMIN_TOKEN environment variable not set"})
 		return false
 	}
-
-	authHeader := c.GetHeader("Authorization")
-	var adminToken string
-	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-		adminToken = authHeader[7:]
-	} else if authHeader != "" {
-		adminToken = authHeader
-	}
-
-	if adminToken != ADMIN_TOKEN {
+	if extractAdminToken(c.GetHeader("Authorization")) != ADMIN_TOKEN {
 		c.JSON(403, gin.H{"error": "Invalid admin authentication"})
 		return false
 	}
-
 	return true
 }

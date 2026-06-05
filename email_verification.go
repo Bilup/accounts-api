@@ -74,7 +74,7 @@ func sendVerifyEmail(toEmail string, username string, token string) {
 	}
 }
 
-func sendResetEmail(toEmail string, username string, token string) {
+func sendResetEmail(toEmail string, username Username, token string) {
 	if SMTP_HOST == "" || SMTP_FROM == "" || BASE_URL == "" {
 		log.Printf("[email] SMTP not configured, skipping reset email for %s", toEmail)
 		return
@@ -109,10 +109,10 @@ func verifyEmailHandler(c *gin.Context) {
 		return
 	}
 	usersMutex.RLock()
-	var foundUser User
+	var foundUser *User
 	for i := range users {
 		if users[i].GetString("sys.email_verify_token") == token {
-			foundUser = users[i]
+			foundUser = &users[i]
 			break
 		}
 	}
@@ -195,11 +195,11 @@ func requestPasswordResetHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "A valid email address is required"})
 		return
 	}
-	var foundUser User
+	var foundUser *User
 	usersMutex.RLock()
 	for i := range users {
-		if strings.EqualFold(users[i].GetEmail(), req.Email) {
-			foundUser = users[i]
+		if strings.EqualFold(users[i].GetString("email"), req.Email) {
+			foundUser = &users[i]
 			break
 		}
 	}
@@ -219,7 +219,7 @@ func requestPasswordResetHandler(c *gin.Context) {
 	foundUser.Set("sys.reset_sent", now)
 	foundUser.Set("sys.reset_expires", now+3_600_000)
 	go saveUsers()
-	go sendResetEmail(foundUser.GetEmail(), string(foundUser.GetUsername()), token)
+	go sendResetEmail(foundUser.GetString("email"), foundUser.GetUsername(), token)
 	c.JSON(200, gin.H{"message": "If an account with that email exists, a reset link has been sent"})
 }
 
@@ -241,10 +241,10 @@ func resetPasswordHandler(c *gin.Context) {
 		return
 	}
 	usersMutex.RLock()
-	var foundUser User
+	var foundUser *User
 	for i := range users {
 		if users[i].GetString("sys.reset_token") == req.Token {
-			foundUser = users[i]
+			foundUser = &users[i]
 			break
 		}
 	}
@@ -261,7 +261,7 @@ func resetPasswordHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Reset token has expired"})
 		return
 	}
-	SetPasswordV1(foundUser, req.NewPassword)
+	SetPasswordV1(*foundUser, req.NewPassword)
 	foundUser.Set("sys.reset_token", "")
 	foundUser.Set("sys.reset_expires", 0)
 	go saveUsers()

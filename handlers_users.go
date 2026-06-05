@@ -558,7 +558,6 @@ func registerUser(c *gin.Context) {
 		return
 	}
 
-	usernameLower := username.ToLower()
 	if ok, msg := ValidateUsername(username); !ok {
 		c.JSON(400, gin.H{"error": msg})
 		return
@@ -566,34 +565,6 @@ func registerUser(c *gin.Context) {
 
 	if IsIpInBannedList(ip) {
 		c.JSON(400, gin.H{"error": "IP address is banned"})
-		return
-	}
-
-	usersMutex.RLock()
-	usernameExists := false
-	emailExists := false
-	for _, user := range users {
-		mu := getMutexForUser(user)
-		mu.Lock()
-		uname, _ := user["username"].(string)
-		em, _ := user["email"].(string)
-		mu.Unlock()
-		if Username(uname).ToLower() == usernameLower {
-			usernameExists = true
-			break
-		}
-		if strings.EqualFold(em, email) {
-			emailExists = true
-			break
-		}
-	}
-	usersMutex.RUnlock()
-	if usernameExists {
-		c.JSON(400, gin.H{"error": "Username already in use"})
-		return
-	}
-	if emailExists {
-		c.JSON(400, gin.H{"error": "Email already in use"})
 		return
 	}
 
@@ -644,44 +615,44 @@ func registerUser(c *gin.Context) {
 }
 
 func findUserSize(username Username) int {
+	user, err := getAccountByUsername(username)
+	if err != nil {
+		return 0
+	}
 	totalSize := 0
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-	for _, u := range users {
-		if u.GetUsername().ToLower() == username {
-			for k, v := range u {
-				if strings.HasPrefix(k, "sys.") {
-					continue
-				}
-				switch v := v.(type) {
-				case string:
-					totalSize += len(v)
-				case []string:
-					for _, item := range v {
-						totalSize += len(item)
-					}
-				case []any:
-					for _, item := range v {
-						if strItem, ok := item.(string); ok {
-							totalSize += len(strItem)
-						}
-					}
-				case map[string]any:
-					for mk, mv := range v {
-						if strMv, ok := mv.(string); ok {
-							totalSize += len(strMv)
-						}
-						if strMk := strings.ToLower(mk); strMk != "username" && strMk != "sys.password" {
-							totalSize += len(strMk)
-						}
-					}
-				default:
-					// Handle other types if necessary
-					totalSize += 100 // Arbitrary size for unknown types
+	mu := getMutexForUser(user)
+	mu.Lock()
+	for k, v := range user {
+		if strings.HasPrefix(k, "sys.") {
+			continue
+		}
+		switch v := v.(type) {
+		case string:
+			totalSize += len(v)
+		case []string:
+			for _, item := range v {
+				totalSize += len(item)
+			}
+		case []any:
+			for _, item := range v {
+				if strItem, ok := item.(string); ok {
+					totalSize += len(strItem)
 				}
 			}
+		case map[string]any:
+			for mk, mv := range v {
+				if strMv, ok := mv.(string); ok {
+					totalSize += len(strMv)
+				}
+				if strings.ToLower(mk) != "username" && strings.ToLower(mk) != "password" {
+					totalSize += len(mk)
+				}
+			}
+		default:
+			totalSize += 100
 		}
 	}
+	mu.Unlock()
 	return totalSize
 }
 func canUpdateUsernameUnsafe(username Username) (bool, string) {
@@ -1141,7 +1112,6 @@ func deleteUserKey(c *gin.Context) {
 // Handles tax, transaction logging, and safety rules.
 // Returns an error if the transfer cannot be completed.
 func PerformCreditTransfer(fromUsername, toUsername Username, amount float64, note string) error {
-	const totalTax = 0.0
 	const taxRecipientShare = 0.25
 
 	// normalize + validate amount
@@ -1166,8 +1136,8 @@ func PerformCreditTransfer(fromUsername, toUsername Username, amount float64, no
 
 	fromCurrency := roundVal(fromUser.GetCredits())
 	if fromUsername != "rotur" {
-		if fromCurrency < (nAmount + totalTax) {
-			return fmt.Errorf("insufficient funds (required: %.2f, available: %.2f)", nAmount+totalTax, fromCurrency)
+		if fromCurrency < nAmount {
+			return fmt.Errorf("insufficient funds (required: %.2f, available: %.2f)", nAmount, fromCurrency)
 		}
 	}
 
@@ -1215,7 +1185,7 @@ func PerformCreditTransfer(fromUsername, toUsername Username, amount float64, no
 	}
 	// Update balances
 	if fromUser.GetUsername() != "rotur" {
-		fromUser.SetBalance(roundVal(fromCurrency - (nAmount + totalTax)))
+		fromUser.SetBalance(roundVal(fromCurrency - nAmount))
 	}
 	if toUser.GetUsername() != "rotur" {
 		toUser.SetBalance(roundVal(toCurrency + nAmount))
@@ -1225,9 +1195,9 @@ func PerformCreditTransfer(fromUsername, toUsername Username, amount float64, no
 	fromUser.addTransaction(Transaction{
 		Note:     note,
 		User:     toUser.GetId(),
-		Amount:   nAmount + totalTax,
+		Amount:   nAmount,
 		Type:     "out",
-		NewTotal: fromCurrency - nAmount - totalTax,
+		NewTotal: fromCurrency - nAmount,
 	})
 	toUser.addTransaction(Transaction{
 		Note:     note,
@@ -1406,54 +1376,6 @@ func transferCreditsAdmin(c *gin.Context) {
 
 func removeUserDirectory(path string) error {
 	return os.RemoveAll(path)
-}
-
-func reconnectFriends(_ any) {
-	usersMutex.RLock()
-	friendMap := make(map[UserId][]UserId, len(users))
-	for i := range users {
-		u := users[i]
-		friends := getStringSlice(u, "sys.friends")
-		valid := make([]UserId, 0, len(friends))
-		for _, f := range friends {
-			if friendUser := UserId(f).User(); friendUser != nil {
-				valid = append(valid, UserId(f))
-			}
-		}
-		uid, _ := u["sys.id"].(string)
-		friendMap[UserId(uid)] = valid
-	}
-	usersMutex.RUnlock()
-
-	for uId, friends := range friendMap {
-		for _, f := range friends {
-			if !accountExists(f) {
-				continue
-			}
-
-			friendList := friendMap[f]
-			if !slices.Contains(friendList, uId) {
-				friendMap[f] = append(friendList, uId)
-			}
-		}
-	}
-
-	changed := false
-
-	for uId, finalList := range friendMap {
-		u := getUserById(uId)
-		old := u.GetFriends()
-
-		if !slices.Equal(old, finalList) {
-			u.SetFriends(finalList)
-			changed = true
-		}
-	}
-
-	if changed {
-		go saveUsers()
-		log.Printf("Reconnected %d friends", len(friendMap))
-	}
 }
 
 func performUserDeletion(username Username, isAdmin bool, ban bool) error {

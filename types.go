@@ -82,16 +82,6 @@ const (
 	RequestDeclined RequestStatus = "DECLINED"
 )
 
-type GroupFile struct {
-	Group           Group                          `json:"group"`
-	Members         []GroupMember                  `json:"members"`
-	Roles           []GroupRole                    `json:"roles"`
-	Announcements   []GroupAnnouncement            `json:"announcements"`
-	Events          map[string]GroupEvent          `json:"events"`
-	Tips            []GroupTip                     `json:"tips"`
-	BenefitProducts map[string]GroupBenefitProduct `json:"benefit_products"`
-}
-
 type Group struct {
 	Id             GroupId    `json:"id"`
 	Tag            string     `json:"tag"`
@@ -119,22 +109,6 @@ func getGroupById(id GroupId) (*Group, bool) {
 
 	for _, data := range groupsData {
 		if data.Group.Id == id {
-			return &data.Group, true
-		}
-	}
-	return &Group{}, false
-}
-
-func getGroupByName(name string) (*Group, bool) {
-	if name == "" {
-		return &Group{}, false
-	}
-
-	groupsDataMutex.RLock()
-	defer groupsDataMutex.RUnlock()
-
-	for _, data := range groupsData {
-		if data.Group.Name == name {
 			return &data.Group, true
 		}
 	}
@@ -281,22 +255,7 @@ func updateGroupRolesMap(groupTag string, rolesMap map[string]GroupRole) {
 	go saveGroupData(groupTag)
 }
 
-type GroupPublic struct {
-	Tag            string     `json:"tag"`
-	Name           string     `json:"name"`
-	Description    string     `json:"description"`
-	Readme         string     `json:"readme"`
-	Rules          string     `json:"rules"`
-	IconUrl        string     `json:"icon_url"`
-	BannerUrl      string     `json:"banner_url"`
-	OwnerUserId    Username   `json:"owner_user_id"`
-	Public         bool       `json:"public"`
-	JoinPolicy     JoinPolicy `json:"join_policy"`
-	EntryFee       float64    `json:"entry_fee"`
-	CreatedAt      int64      `json:"created_at"`
-	CreditsBalance float64    `json:"credits_balance"`
-	MemberCount    int        `json:"member_count"`
-}
+type GroupPublic = GroupNet
 
 type GroupNet struct {
 	Id             GroupId    `json:"id"`
@@ -522,7 +481,6 @@ func tierPlus() sub_benefits {
 	b.Max_Keys = 20
 	b.Max_Login_History = 100
 	b.Max_Rmails = 1000
-	b.FileSystem_Size = 15_000_000
 	b.Bio_Length = 500
 	b.Has_Animated_Pfp = true
 	b.Max_Transaction_History = 100
@@ -1755,21 +1713,21 @@ type Key struct {
 	Webhook      *string                `json:"webhook,omitempty"`
 }
 
-func (k *Key) ToNet() NetKey {
+func (key *Key) ToNet() NetKey {
 	users := make(map[Username]KeyUserData)
-	for k, v := range k.Users {
-		users[k.User().GetUsername()] = v
+	for uid, v := range key.Users {
+		users[uid.User().GetUsername()] = v
 	}
 	return NetKey{
-		Key:          k.Key,
-		Name:         k.Name,
-		Price:        k.Price,
-		Type:         k.Type,
-		TotalIncome:  k.TotalIncome,
-		Webhook:      k.Webhook,
-		Subscription: k.Subscription,
+		Key:          key.Key,
+		Name:         key.Name,
+		Price:        key.Price,
+		Type:         key.Type,
+		TotalIncome:  key.TotalIncome,
+		Webhook:      key.Webhook,
+		Subscription: key.Subscription,
 		Users:        users,
-		Creator:      k.Creator.User().GetUsername(),
+		Creator:      key.Creator.User().GetUsername(),
 	}
 }
 
@@ -1961,59 +1919,36 @@ func (u User) GetStandingRecoverAt() int64 {
 	return 0
 }
 
-func (u User) CanCreatePost() bool {
-	standing := u.GetStanding()
-	return standing == StandingGood
+func standingRank(level StandingLevel) int {
+	switch level {
+	case StandingGood:
+		return 0
+	case StandingWarning:
+		return 1
+	case StandingSuspended:
+		return 2
+	case StandingBanned:
+		return 3
+	default:
+		return 0
+	}
 }
 
-func (u User) CanCreateReply() bool {
-	standing := u.GetStanding()
-	return standing == StandingGood
+func (u User) canStanding(minAllowed StandingLevel) bool {
+	return standingRank(u.GetStanding()) <= standingRank(minAllowed)
 }
 
-func (u User) CanRepost() bool {
-	standing := u.GetStanding()
-	return standing == StandingGood
-}
-
-func (u User) CanTradeBuy() bool {
-	standing := u.GetStanding()
-	return standing == StandingGood || standing == StandingWarning
-}
-
-func (u User) CanTradeSell() bool {
-	standing := u.GetStanding()
-	return standing == StandingGood
-}
-
-func (u User) CanTradeTransfer() bool {
-	standing := u.GetStanding()
-	return standing == StandingGood
-}
-
-func (u User) CanInteractFriend() bool {
-	standing := u.GetStanding()
-	return standing == StandingGood
-}
-
-func (u User) CanFollow() bool {
-	standing := u.GetStanding()
-	return standing == StandingGood || standing == StandingWarning
-}
+func (u User) CanCreatePost() bool     { return u.canStanding(StandingGood) }
+func (u User) CanCreateReply() bool    { return u.canStanding(StandingGood) }
+func (u User) CanRepost() bool         { return u.canStanding(StandingGood) }
+func (u User) CanTradeBuy() bool       { return u.canStanding(StandingWarning) }
+func (u User) CanTradeSell() bool      { return u.canStanding(StandingGood) }
+func (u User) CanTradeTransfer() bool  { return u.canStanding(StandingGood) }
+func (u User) CanInteractFriend() bool { return u.canStanding(StandingGood) }
+func (u User) CanFollow() bool         { return u.canStanding(StandingWarning) }
 
 func (u User) HasStandingOrHigher(required StandingLevel) bool {
-	current := u.GetStanding()
-	switch required {
-	case StandingBanned:
-		return true
-	case StandingSuspended:
-		return current == StandingGood || current == StandingWarning || current == StandingSuspended
-	case StandingWarning:
-		return current == StandingGood || current == StandingWarning
-	case StandingGood:
-		return current == StandingGood
-	}
-	return false
+	return standingRank(u.GetStanding()) <= standingRank(required)
 }
 
 // Global variables
@@ -2058,7 +1993,6 @@ var (
 	gifts      []Gift
 	giftsMutex sync.RWMutex
 
-	derogatoryTerms    = make([]string, 0)
 	cosmeticGifts      []CosmeticGift
 	cosmeticGiftsMutex sync.RWMutex
 )

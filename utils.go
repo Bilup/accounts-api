@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -105,13 +106,6 @@ func requireTier(tier string) gin.HandlerFunc {
 	}
 }
 
-func doAfter(fn func(any), data any, after time.Duration) {
-	time.Sleep(after)
-	go func() {
-		fn(data)
-	}()
-}
-
 func tierRank(tier string) int {
 	switch strings.ToLower(tier) {
 	case "lite":
@@ -131,20 +125,6 @@ func hasTierOrHigher(tier, required string) bool {
 	return tierRank(tier) >= tierRank(required)
 }
 
-func hasRequiredStanding(current StandingLevel, required StandingLevel) bool {
-	switch required {
-	case StandingBanned:
-		return true
-	case StandingSuspended:
-		return current == StandingGood || current == StandingWarning || current == StandingSuspended
-	case StandingWarning:
-		return current == StandingGood || current == StandingWarning
-	case StandingGood:
-		return current == StandingGood
-	}
-	return false
-}
-
 func requireStanding(minLevel StandingLevel) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := c.MustGet("user").(*User)
@@ -158,48 +138,50 @@ func requireStanding(minLevel StandingLevel) gin.HandlerFunc {
 	}
 }
 
-func loadBannedWords() {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(BANNED_WORDS_URL)
-	if err != nil {
-		log.Printf("Error loading banned words list: %v", err)
-		derogatoryTerms = []string{} // Fallback to empty list
-		return
+func normalizeEscrowAmount(raw float64) (float64, bool) {
+	amt := roundVal(raw)
+	if amt < 0.01 {
+		return 0, false
 	}
-	defer resp.Body.Close()
+	return amt, true
+}
 
-	if resp.StatusCode == 200 {
-		body, err := io.ReadAll(resp.Body)
+func loadBannedWords() {
+	words, err := loadBannedWordsLocal()
+	if err != nil {
+		log.Printf("Error loading banned words: %v", err)
+	} else {
+		log.Printf("Loaded %d banned words", len(words))
+	}
+}
+
+var bannedWordPatterns []*regexp.Regexp
+var bannedWordPatternsOnce sync.Once
+
+func compileBannedWordPatterns() {
+	bannedWordPatternsOnce.Do(func() {
+		words, err := loadBannedWordsLocal()
 		if err != nil {
-			log.Printf("Error reading banned words: %v", err)
 			return
 		}
-
-		words := strings.Split(string(body), "\n")
-		derogatoryTerms = make([]string, 0, len(words))
-		for _, word := range words {
-			word = strings.TrimSpace(word)
-			if word != "" {
-				derogatoryTerms = append(derogatoryTerms, word)
+		bannedWordPatterns = make([]*regexp.Regexp, 0, len(words))
+		for _, term := range words {
+			pattern := `\b` + regexp.QuoteMeta(strings.ToLower(term)) + `\b`
+			if re, err := regexp.Compile(pattern); err == nil {
+				bannedWordPatterns = append(bannedWordPatterns, re)
 			}
 		}
-		log.Printf("Loaded %d banned words", len(derogatoryTerms))
-	} else {
-		log.Printf("Failed to load banned words list: HTTP %d", resp.StatusCode)
-		derogatoryTerms = []string{} // Fallback to empty list
-	}
+	})
 }
 
 func containsDerogatory(text string) bool {
 	if text == "" {
 		return false
 	}
-
+	compileBannedWordPatterns()
 	textLower := strings.ToLower(text)
-	for _, term := range derogatoryTerms {
-		pattern := `\b` + regexp.QuoteMeta(strings.ToLower(term)) + `\b`
-		matched, _ := regexp.MatchString(pattern, textLower)
-		if matched {
+	for _, re := range bannedWordPatterns {
+		if re.MatchString(textLower) {
 			return true
 		}
 	}
@@ -215,16 +197,12 @@ func accountExists(userId UserId) bool {
 }
 
 func isUserBlockedBy(user User, userId UserId) bool {
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-
 	blocked := user.GetBlocked()
 	for _, blockedId := range blocked {
 		if blockedId == userId {
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -454,8 +432,25 @@ func requireMainToken() gin.HandlerFunc {
 	}
 }
 
+var bannedIPsCache struct {
+	sync.RWMutex
+	ips   []string
+	mtime time.Time
+}
+
+const bannedIPsPath = "./rotur/banned.json"
+
 func getBannedIPs() []string {
-	file, err := os.Open("/Users/admin/Documents/rotur/banned.json")
+	now := time.Now()
+	bannedIPsCache.RLock()
+	if now.Sub(bannedIPsCache.mtime) < 5*time.Minute {
+		ips := bannedIPsCache.ips
+		bannedIPsCache.RUnlock()
+		return ips
+	}
+	bannedIPsCache.RUnlock()
+
+	file, err := os.Open(bannedIPsPath)
 	if err != nil {
 		return []string{}
 	}
@@ -469,17 +464,21 @@ func getBannedIPs() []string {
 		return []string{}
 	}
 
+	bannedIPsCache.Lock()
+	bannedIPsCache.ips = data.IPs
+	bannedIPsCache.mtime = now
+	bannedIPsCache.Unlock()
+
 	return data.IPs
 }
 
 func isBannedIp(ip string) bool {
 	bannedIPs := getBannedIPs()
-	if slices.Contains(bannedIPs, ip) {
-		return true
-	}
 	for _, bannedIP := range bannedIPs {
-		// handle when ipv6 all start with the same prefix, so ban a block of them
-		if bannedIP[4] == ":"[0] && strings.HasPrefix(ip, bannedIP) {
+		if bannedIP == ip {
+			return true
+		}
+		if len(bannedIP) > 4 && bannedIP[4] == ':' && strings.HasPrefix(ip, bannedIP) {
 			return true
 		}
 	}
@@ -505,17 +504,6 @@ func JSONStringify(v any) string {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return !os.IsNotExist(err) && info.Mode().IsRegular()
-}
-
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	if err == nil {
-		return info.IsDir()
-	}
-	if os.IsNotExist(err) {
-		return false
-	}
-	return false
 }
 
 func copyAndReplace(src, dst, old, new string) error {
@@ -606,8 +594,19 @@ func deleteAccountAtIndexFast(idx int) error {
 		return fmt.Errorf("index out of range")
 	}
 
+	removedUser := users[idx]
+	removedUserId := removedUser.GetId()
+	removedUsername := removedUser.GetUsername().ToLower()
+	removedKey := removedUser.GetKey()
+
 	users[idx] = users[len(users)-1]
 	users = users[:len(users)-1]
+
+	idToUserMutex.Lock()
+	delete(idToUser, removedUserId)
+	delete(usernameToId, removedUsername)
+	delete(keyToUserIdx, removedKey)
+	idToUserMutex.Unlock()
 
 	go saveUsers()
 	return nil
@@ -641,22 +640,7 @@ func loadGifts() {
 func saveGifts() {
 	giftsMutex.RLock()
 	defer giftsMutex.RUnlock()
-
-	data, err := json.MarshalIndent(gifts, "", "  ")
-	if err != nil {
-		log.Printf("Error marshaling gifts: %v", err)
-		return
-	}
-
-	tmpFile := "gifts.json.tmp"
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
-		log.Printf("Error writing gifts temp file: %v", err)
-		return
-	}
-
-	if err := os.Rename(tmpFile, "gifts.json"); err != nil {
-		log.Printf("Error renaming gifts file: %v", err)
-	}
+	saveJsonFile("gifts.json", gifts)
 }
 
 func cleanExpiredGifts() {

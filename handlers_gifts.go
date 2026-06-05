@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -322,26 +323,10 @@ func getMyGifts(c *gin.Context) {
 }
 
 func trimAndCapNote(note string, maxLen int) string {
-	note = trim(note)
+	note = strings.TrimSpace(note)
 	runes := []rune(note)
 	if len(runes) > maxLen {
 		runes = runes[:maxLen]
 	}
 	return string(runes)
-}
-
-func trim(s string) string {
-	return trimSpace(s)
-}
-
-func trimSpace(s string) string {
-	start := 0
-	end := len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
 }

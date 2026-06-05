@@ -9,32 +9,25 @@ func noteUser(c *gin.Context) {
 		return
 	}
 
-	authKey := c.Query("auth")
-	if authKey == "" {
-		c.JSON(400, gin.H{"error": "Authentication key is required"})
-		return
-	}
+	user := c.MustGet("user").(*User)
 
-	noteContent := c.Query("note")
-	if noteContent == "" {
+	var req struct {
+		Note string `json:"note"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req.Note = c.Query("note")
+	}
+	if req.Note == "" {
 		c.JSON(400, gin.H{"error": "Note content is required"})
 		return
 	}
 
-	user := authenticateWithKey(authKey)
-	if user == nil {
-		c.JSON(403, gin.H{"error": "Invalid authentication key"})
-		return
-	}
-
-	err := user.SetNote(username, noteContent)
+	err := user.SetNote(username, req.Note)
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-
 	go saveUsers()
-
 	c.JSON(200, gin.H{"success": true})
 }
 
@@ -45,21 +38,8 @@ func deleteNote(c *gin.Context) {
 		return
 	}
 
-	authKey := c.Query("auth")
-	if authKey == "" {
-		c.JSON(400, gin.H{"error": "Authentication key is required"})
-		return
-	}
-
-	user := authenticateWithKey(authKey)
-	if user == nil {
-		c.JSON(403, gin.H{"error": "Invalid authentication key"})
-		return
-	}
-
+	user := c.MustGet("user").(*User)
 	user.RemoveNote(username)
-
 	go saveUsers()
-
 	c.JSON(200, gin.H{"success": true})
 }
