@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-var DAILY_CLAIMS_FILE_PATH = "./rotur_daily.json"
+const DAILY_CLAIMS_FILE_PATH = "./rotur_daily.json"
 
 const USERS_FILE_PATH = "./users.json"
 

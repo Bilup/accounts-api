@@ -25,8 +25,9 @@ import (
 )
 
 var (
-	avatarBaseDir        string
-	bannerBaseDir        string
+	avatarBaseDir string
+	bannerBaseDir string
+
 	defaultAvatarContent []byte
 	defaultAvatarEtag    string
 	defaultBannerContent []byte
@@ -81,6 +82,7 @@ func loadAvatarConfig() {
 
 func init() {
 	loadAvatarConfig()
+
 	// Try to fetch the real default image; fall back to generated placeholder
 	resp, err := http.Get(defaultAvatarURL)
 	if err != nil || resp.StatusCode != 200 {
@@ -96,11 +98,44 @@ func init() {
 			defaultAvatarEtag = fmt.Sprintf("%x", md5.Sum(body))
 		}
 	}
+
 	loadDefaultBanner()
 	loadOverlays()
 }
 
-// --- Avatar metadata helpers ---
+var (
+	overlayCosmeticsCache   map[UserId]string
+	overlayCosmeticsCacheMu sync.RWMutex
+)
+
+func getActiveOverlayCached(userId UserId) string {
+	overlayCosmeticsCacheMu.RLock()
+	name, ok := overlayCosmeticsCache[userId]
+	overlayCosmeticsCacheMu.RUnlock()
+	if ok {
+		return name
+	}
+
+	uc, err := loadUserCosmetics(userId)
+	name = ""
+	if err == nil && uc != nil {
+		name = uc.ActiveCosmetics[CosmeticTypeOverlay]
+	}
+
+	overlayCosmeticsCacheMu.Lock()
+	if overlayCosmeticsCache == nil {
+		overlayCosmeticsCache = make(map[UserId]string)
+	}
+	overlayCosmeticsCache[userId] = name
+	overlayCosmeticsCacheMu.Unlock()
+	return name
+}
+
+func InvalidateOverlayCosmeticsCache(userId UserId) {
+	overlayCosmeticsCacheMu.Lock()
+	delete(overlayCosmeticsCache, userId)
+	overlayCosmeticsCacheMu.Unlock()
+}
 
 func getAvatarMetadata(username Username) (filePath, contentType, etag string, err error) {
 	base := username.ToLower()
@@ -125,6 +160,17 @@ func deleteAvatars(username Username) {
 	}
 }
 
+func shouldConvertToStill(c *gin.Context, tier string, contentType string, metaErr error) bool {
+	if metaErr != nil || contentType != "image/gif" {
+		return false
+	}
+	if c.Query("no_animate") != "" {
+		return true
+	}
+	allowAnimated := hasTierOrHigher(tier, "plus")
+	return !allowAnimated
+}
+
 // --- Avatar handler ---
 
 func avatarHandler(c *gin.Context) {
@@ -133,10 +179,9 @@ func avatarHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Username is required"})
 		return
 	}
-
 	username := Username(usernameStr)
+
 	if len(usernameStr) == 36 {
-		// likely a user id
 		username = UserId(usernameStr).User().GetUsername()
 	}
 
@@ -145,18 +190,20 @@ func avatarHandler(c *gin.Context) {
 	clientEtag := c.GetHeader("If-None-Match")
 
 	filePath, contentType, baseEtag, metaErr := getAvatarMetadata(username)
-
 	tier, _ := getUserTierCached(username)
-	allowAnimated := hasTierOrHigher(tier, "plus")
-	forceFirstFrameJpeg := !allowAnimated && metaErr == nil && contentType == "image/gif"
-	finalEtagBase := baseEtag
-	if metaErr != nil {
-		contentType = "image/jpeg"
-		finalEtagBase = defaultAvatarEtag
-	}
+
+	forceStill := shouldConvertToStill(c, tier, contentType, metaErr)
 
 	var sb strings.Builder
-	sb.WriteString(finalEtagBase)
+	if metaErr != nil {
+		contentType = "image/jpeg"
+		sb.WriteString(defaultAvatarEtag)
+	} else {
+		sb.WriteString(baseEtag)
+	}
+	if forceStill {
+		sb.WriteString("-still")
+	}
 	if sizeStr != "" {
 		sb.WriteString("-s=")
 		sb.WriteString(sizeStr)
@@ -165,23 +212,24 @@ func avatarHandler(c *gin.Context) {
 		sb.WriteString("-r=")
 		sb.WriteString(radiusStr)
 	}
-	if forceFirstFrameJpeg {
-		sb.WriteString("-ffjpg")
+
+	cacheKey := sb.String()
+
+	if forceStill {
 		contentType = "image/jpeg"
 	}
 
-	cacheKey := sb.String()
-	modifier := sizeStr != "" || radiusStr != ""
+	modifier := sizeStr != "" || radiusStr != "" || forceStill
 
-	if !modifier && metaErr == nil && !forceFirstFrameJpeg {
-		etagQuoted := `"` + finalEtagBase + `"`
+	if !modifier && metaErr == nil {
+		etagQuoted := `"` + baseEtag + `"`
 		if clientEtag == etagQuoted {
 			c.Status(http.StatusNotModified)
 			return
 		}
 		c.Header("ETag", etagQuoted)
 		c.Header("Content-Type", contentType)
-		c.Header("Cache-Control", "public, max-age=0, must-revalidate")
+		c.Header("Cache-Control", "public, max-age=300, must-revalidate")
 		if c.Request.Method == http.MethodHead {
 			c.Status(200)
 			return
@@ -191,9 +239,10 @@ func avatarHandler(c *gin.Context) {
 	}
 
 	etagQuoted := `"` + cacheKey + `"`
+
 	if c.Request.Method == http.MethodHead {
 		c.Header("Content-Type", contentType)
-		c.Header("Cache-Control", "public, max-age=0, must-revalidate")
+		c.Header("Cache-Control", "public, max-age=300, must-revalidate")
 		c.Header("ETag", etagQuoted)
 		c.Status(200)
 		return
@@ -205,7 +254,7 @@ func avatarHandler(c *gin.Context) {
 			return
 		}
 		c.Header("ETag", etagQuoted)
-		c.Header("Cache-Control", "public, max-age=0, must-revalidate")
+		c.Header("Cache-Control", "public, max-age=300, must-revalidate")
 		c.Data(http.StatusOK, ct, cached)
 		return
 	}
@@ -224,7 +273,7 @@ func avatarHandler(c *gin.Context) {
 		}
 	}
 
-	if forceFirstFrameJpeg {
+	if contentType == "image/gif" && forceStill {
 		if img, err := decodeFirstGIFFrame(imageData); err == nil {
 			if encoded, err := encodeJPEG(img, 85); err == nil {
 				imageData = encoded
@@ -233,7 +282,6 @@ func avatarHandler(c *gin.Context) {
 		}
 	}
 
-	// --- GIF path ---
 	if contentType == "image/gif" {
 		if sizeStr != "" {
 			if sz, err := strconv.Atoi(sizeStr); err == nil && sz > 0 && sz <= 256 {
@@ -242,7 +290,6 @@ func avatarHandler(c *gin.Context) {
 				}
 			}
 		}
-
 		if radiusStr != "" {
 			radiusInt, err := strconv.Atoi(strings.TrimSuffix(radiusStr, "px"))
 			if err == nil && radiusInt > 0 {
@@ -269,13 +316,12 @@ func avatarHandler(c *gin.Context) {
 			return
 		}
 		c.Header("Content-Type", "image/gif")
-		c.Header("Cache-Control", "public, max-age=0, must-revalidate")
+		c.Header("Cache-Control", "public, max-age=300, must-revalidate")
 		c.Header("ETag", etagQuoted)
 		c.Data(http.StatusOK, "image/gif", imageData)
 		return
 	}
 
-	// --- Non-GIF path: decode once, reuse img across all transforms ---
 	img, _, err := image.Decode(bytes.NewReader(imageData))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Error decoding image"})
@@ -285,12 +331,16 @@ func avatarHandler(c *gin.Context) {
 	if radiusStr != "" {
 		radiusInt, err := strconv.Atoi(strings.TrimSuffix(radiusStr, "px"))
 		if err == nil && radiusInt > 0 {
-			if rounded, newCt, err := roundCorners(imageData, radiusInt); err == nil {
-				imageData = rounded
-				contentType = newCt
-				// Re-decode so overlay/resize work on rounded image
-				img, _, _ = image.Decode(bytes.NewReader(imageData))
+			bounds := img.Bounds()
+			w, h := bounds.Dx(), bounds.Dy()
+			if radiusInt > h/2 {
+				radiusInt = h / 2
 			}
+			result := image.NewRGBA(bounds)
+			draw.Draw(result, bounds, img, bounds.Min, draw.Src)
+			mask := roundedRectMask(w, h, radiusInt)
+			draw.DrawMask(result, bounds, result, bounds.Min, mask, image.Point{}, draw.Over)
+			img = result
 		}
 	}
 
@@ -308,7 +358,31 @@ func avatarHandler(c *gin.Context) {
 			imageData = make([]byte, buf.Len())
 			copy(imageData, buf.Bytes())
 			contentType = "image/jpeg"
+		} else {
+			if radiusStr != "" {
+				buf := avatarBufPool.Get().(*bytes.Buffer)
+				buf.Reset()
+				defer avatarBufPool.Put(buf)
+				if contentType == "image/png" {
+					png.Encode(buf, img)
+				} else {
+					jpeg.Encode(buf, img, &jpeg.Options{Quality: 85})
+				}
+				imageData = make([]byte, buf.Len())
+				copy(imageData, buf.Bytes())
+			}
 		}
+	} else if radiusStr != "" {
+		buf := avatarBufPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer avatarBufPool.Put(buf)
+		if contentType == "image/png" {
+			png.Encode(buf, img)
+		} else {
+			jpeg.Encode(buf, img, &jpeg.Options{Quality: 85})
+		}
+		imageData = make([]byte, buf.Len())
+		copy(imageData, buf.Bytes())
 	}
 
 	avatarCache.Set(cacheKey, imageData, contentType)
@@ -317,17 +391,16 @@ func avatarHandler(c *gin.Context) {
 		return
 	}
 	c.Header("Content-Type", contentType)
-	c.Header("Cache-Control", "public, max-age=0, must-revalidate")
+	c.Header("Cache-Control", "public, max-age=300, must-revalidate")
 	c.Header("ETag", etagQuoted)
 	c.Data(http.StatusOK, contentType, imageData)
 }
 
 func overlayHandler(c *gin.Context) {
 	usernameStr, _ := strings.CutSuffix(strings.ToLower(c.Param("username")), ".gif")
-
 	username := Username(usernameStr)
+
 	if len(usernameStr) == 36 {
-		// likely a user id
 		username = UserId(usernameStr).User().GetUsername()
 	}
 
@@ -337,13 +410,8 @@ func overlayHandler(c *gin.Context) {
 	}
 
 	userId := username.Id()
-	uc, err := loadUserCosmetics(userId)
-	if err != nil {
-		sendEmpty(c)
-		return
-	}
-	overlayName, ok := uc.ActiveCosmetics[CosmeticTypeOverlay]
-	if !ok || overlayName == "" {
+	overlayName := getActiveOverlayCached(userId)
+	if overlayName == "" {
 		sendEmpty(c)
 		return
 	}
@@ -354,6 +422,7 @@ func overlayHandler(c *gin.Context) {
 		return
 	}
 
+	c.Header("Cache-Control", "public, max-age=300, must-revalidate")
 	c.File(path)
 }
 
@@ -388,20 +457,16 @@ func savePfp(dataURI string, user *User) error {
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid image format")
 	}
-
 	mimeHeader := parts[0]
 	estimatedSize := (len(parts[1]) * 3) / 4
 	if estimatedSize > 10*1024*1024 {
 		return fmt.Errorf("image too large")
 	}
-
 	imageData, err := base64.StdEncoding.DecodeString(parts[1])
 	if err != nil {
 		return fmt.Errorf("invalid image data: %w", err)
 	}
-
 	os.MkdirAll(avatarBaseDir, 0755)
-
 	username := user.GetUsername().ToLower()
 	tier := strings.ToLower(user.GetSubscription().Tier)
 	benefits := subs_benefits[tier]
@@ -422,6 +487,9 @@ func savePfp(dataURI string, user *User) error {
 	}
 
 	deleteAvatars(username)
+
+	invalidateAvatarCacheForUser(string(username))
+
 	filePath := filepath.Join(avatarBaseDir, string(username)+ext)
 
 	if contentType == "image/gif" {
@@ -447,9 +515,19 @@ func savePfp(dataURI string, user *User) error {
 			return fmt.Errorf("error encoding image: %w", err)
 		}
 	}
-
-	avatarCache.Clear()
 	return nil
+}
+
+func invalidateAvatarCacheForUser(username string) {
+	avatarCache.mu.Lock()
+	defer avatarCache.mu.Unlock()
+	for key := range avatarCache.items {
+		if strings.HasPrefix(key, username) {
+			avatarCache.curBytes -= avatarCache.items[key].size
+			avatarCache.removeEntry(avatarCache.items[key])
+			delete(avatarCache.items, key)
+		}
+	}
 }
 
 func uploadPfpHandler(c *gin.Context) {
@@ -461,7 +539,6 @@ func uploadPfpHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON data"})
 		return
 	}
-
 	user := authenticateWithKey(req.Token)
 	if user == nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid token"})
@@ -471,7 +548,6 @@ func uploadPfpHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing image"})
 		return
 	}
-
 	if err := savePfp(req.Image, user); err != nil {
 		status := http.StatusInternalServerError
 		if strings.Contains(err.Error(), "invalid image format") ||
@@ -483,7 +559,6 @@ func uploadPfpHandler(c *gin.Context) {
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "Success",
 		"message": "Profile picture uploaded successfully",
@@ -524,14 +599,14 @@ func bannerHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Username is required"})
 		return
 	}
-
 	username := Username(usernameStr)
+
 	if len(usernameStr) == 36 {
-		// likely a user id
 		username = UserId(usernameStr).User().GetUsername()
 	}
 
 	radiusStr := c.Query("radius")
+	noAnimate := c.Query("no_animate") != ""
 	radiusInt, parseErr := strconv.Atoi(strings.TrimSuffix(radiusStr, "px"))
 	needRounding := radiusStr != "" && parseErr == nil && radiusInt > 0
 
@@ -539,14 +614,18 @@ func bannerHandler(c *gin.Context) {
 	isPro := hasTierOrHigher(tier, "Pro")
 
 	bannerPath, contentType, etag, modTime, err := getBannerPath(username)
-	forceFirstFrameJpeg := !isPro && err == nil && contentType == "image/gif"
-
-	if forceFirstFrameJpeg {
+	forceStill := !isPro && err == nil && contentType == "image/gif"
+	if noAnimate && contentType == "image/gif" {
+		forceStill = true
+	}
+	if forceStill {
 		contentType = "image/jpeg"
 		if etag != "" {
-			etag = etag + "-ffjpg"
+			etag = etag + "-still"
 		}
 	}
+
+	clientEtag := c.GetHeader("If-None-Match")
 
 	var imageData []byte
 	if err != nil {
@@ -556,19 +635,25 @@ func bannerHandler(c *gin.Context) {
 	}
 
 	if !needRounding {
-		c.Header("Content-Type", contentType)
 		if etag != "" {
-			c.Header("ETag", etag)
+			etagQuoted := `"` + etag + `"`
+			if clientEtag == etagQuoted {
+				c.Status(http.StatusNotModified)
+				return
+			}
+			c.Header("ETag", etagQuoted)
 		}
+		c.Header("Content-Type", contentType)
 		if !modTime.IsZero() {
 			c.Header("Last-Modified", modTime.Format(http.TimeFormat))
 		}
-		c.Header("Cache-Control", "public, max-age=0, must-revalidate")
+		c.Header("Cache-Control", "public, max-age=300, must-revalidate")
 		if c.Request.Method == http.MethodHead {
 			c.Status(200)
 			return
 		}
-		if forceFirstFrameJpeg {
+
+		if forceStill {
 			if bannerPath != "" {
 				imageData, err = os.ReadFile(bannerPath)
 				if err != nil {
@@ -589,6 +674,7 @@ func bannerHandler(c *gin.Context) {
 			c.Data(http.StatusOK, "image/jpeg", jpegData)
 			return
 		}
+
 		if bannerPath != "" {
 			c.File(bannerPath)
 		} else {
@@ -597,8 +683,16 @@ func bannerHandler(c *gin.Context) {
 		return
 	}
 
+	etagQuoted := `"` + etag + `"`
+	if clientEtag == etagQuoted {
+		c.Status(http.StatusNotModified)
+		return
+	}
+
 	if c.Request.Method == http.MethodHead {
 		c.Header("Content-Type", contentType)
+		c.Header("Cache-Control", "public, max-age=300, must-revalidate")
+		c.Header("ETag", etagQuoted)
 		c.Status(200)
 		return
 	}
@@ -611,7 +705,7 @@ func bannerHandler(c *gin.Context) {
 		}
 	}
 
-	if forceFirstFrameJpeg {
+	if forceStill {
 		img, err := decodeFirstGIFFrame(imageData)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding GIF"})
@@ -636,13 +730,16 @@ func bannerHandler(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error rounding GIF"})
 			return
 		}
-		buf := bytes.NewBuffer(nil)
+		buf := avatarBufPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer avatarBufPool.Put(buf)
 		if err := gif.EncodeAll(buf, rounded); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error encoding GIF"})
 			return
 		}
 		c.Header("Content-Type", "image/gif")
-		c.Header("Cache-Control", "public, max-age=86400, must-revalidate")
+		c.Header("Cache-Control", "public, max-age=300, must-revalidate")
+		c.Header("ETag", etagQuoted)
 		c.Data(http.StatusOK, "image/gif", buf.Bytes())
 		return
 	}
@@ -652,7 +749,8 @@ func bannerHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error rounding image"})
 		return
 	}
-	c.Header("Cache-Control", "public, max-age=0, must-revalidate")
+	c.Header("Cache-Control", "public, max-age=300, must-revalidate")
+	c.Header("ETag", etagQuoted)
 	c.Data(http.StatusOK, newContentType, rounded)
 }
 
@@ -674,22 +772,18 @@ func saveBanner(dataURI string, user *User) error {
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid image format")
 	}
-
 	mimeHeader := parts[0]
 	imageData, err := base64.StdEncoding.DecodeString(parts[1])
 	if err != nil {
 		return fmt.Errorf("invalid image data: %w", err)
 	}
-
 	if len(imageData) > 10*1024*1024 {
 		return fmt.Errorf("image too large")
 	}
-
 	img, _, err := image.Decode(bytes.NewReader(imageData))
 	if err != nil {
 		return fmt.Errorf("error decoding image: %w", err)
 	}
-
 	tier := strings.ToLower(user.GetSubscription().Tier)
 	benefits := subs_benefits[tier]
 
@@ -736,7 +830,6 @@ func saveBanner(dataURI string, user *User) error {
 			return fmt.Errorf("error encoding banner: %w", err)
 		}
 	}
-
 	return nil
 }
 
@@ -749,7 +842,6 @@ func uploadBannerHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON data"})
 		return
 	}
-
 	user := authenticateWithKey(req.Token)
 	if user == nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid token"})
@@ -759,7 +851,6 @@ func uploadBannerHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing image"})
 		return
 	}
-
 	if err := saveBanner(req.Image, user); err != nil {
 		status := http.StatusInternalServerError
 		if strings.Contains(err.Error(), "invalid image format") ||
@@ -771,7 +862,6 @@ func uploadBannerHandler(c *gin.Context) {
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "Success",
 		"message": "Banner uploaded successfully",

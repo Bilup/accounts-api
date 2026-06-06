@@ -85,10 +85,10 @@ func TestValidateUsername_UppercaseConverted(t *testing.T) {
 	}
 }
 
-func TestValidateUsername_UppercaseRejected(t *testing.T) {
+func TestValidateUsername_UppercaseNormalized(t *testing.T) {
 	ok, _ := ValidateUsername("HelloWorld")
-	if ok {
-		t.Error("Uppercase letters should be rejected by the regex")
+	if !ok {
+		t.Error("Uppercase letters should be normalized to lowercase, not rejected")
 	}
 }
 

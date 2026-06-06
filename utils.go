@@ -47,7 +47,7 @@ func getStringOrEmpty(val any) string {
 
 func getStringOrDefault(val any, defaultVal string) string {
 	if val == nil {
-		return ""
+		return defaultVal
 	}
 	if s, ok := val.(string); ok {
 		return s

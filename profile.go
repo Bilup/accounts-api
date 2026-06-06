@@ -386,26 +386,13 @@ func getProfile(c *gin.Context) {
 }
 
 func getExists(c *gin.Context) {
-	type resp struct {
-		Exists bool `json:"exists"`
-	}
-
 	username := Username(c.Query("username")).ToLower()
 	if username == "" {
 		c.JSON(400, gin.H{"error": "Username is required"})
 		return
 	}
-
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-
-	for _, user := range users {
-		if user.GetUsername().ToLower() == username {
-			c.JSON(200, resp{Exists: true})
-			return
-		}
-	}
-	c.JSON(200, resp{Exists: false})
+	userId := getIdByUsername(username)
+	c.JSON(200, gin.H{"exists": userId != ""})
 }
 
 func getSupporters(c *gin.Context) {

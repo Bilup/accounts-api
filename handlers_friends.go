@@ -96,6 +96,32 @@ func rejectFriendRequest(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "Friend request rejected"})
 }
 
+func cancelFriendRequest(c *gin.Context) {
+	sender := c.MustGet("user").(*User)
+	targetName := Username(c.Param("username")).ToLower()
+	if targetName == "" {
+		c.JSON(400, gin.H{"error": "Username cannot be empty"})
+		return
+	}
+	senderName := sender.GetUsername().ToLower()
+	if senderName == targetName {
+		c.JSON(400, gin.H{"error": "Invalid Operation"})
+		return
+	}
+	target, err := getAccountByUsername(targetName)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "Account Does Not Exist"})
+		return
+	}
+	found := target.RemoveRequest(senderName)
+	if !found {
+		c.JSON(400, gin.H{"error": "No Pending Request"})
+		return
+	}
+	go saveUsers()
+	c.JSON(200, gin.H{"message": "Friend request cancelled"})
+}
+
 func removeFriend(c *gin.Context) {
 	current := c.MustGet("user").(*User)
 	otherName := Username(c.Param("username")).ToLower()

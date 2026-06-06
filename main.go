@@ -282,6 +282,7 @@ func main() {
 		friends.POST("/request/:username", requiresAuth, requirePermission(PermSendFriendReq), requireStanding(StandingGood), sendFriendRequest)
 		friends.POST("/accept/:username", requiresAuth, requirePermission(PermAcceptFriend), acceptFriendRequest)
 		friends.POST("/reject/:username", requiresAuth, requirePermission(PermAcceptFriend), rejectFriendRequest)
+		friends.POST("/cancel/:username", requiresAuth, requirePermission(PermCancelFriendReq), requireStanding(StandingGood), cancelFriendRequest)
 		friends.POST("/remove/:username", requiresAuth, requirePermission(PermRemoveFriend), removeFriend)
 	}
 

@@ -135,9 +135,7 @@ func TestSaveUserJSON_CreatesDirectory(t *testing.T) {
 	}
 }
 
-// --- isValidJSON (more comprehensive tests) ---
-
-func TestIsValidJSON_VariousTypes(t *testing.T) {
+func TestJSONValid_VariousTypes(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected bool
@@ -157,9 +155,9 @@ func TestIsValidJSON_VariousTypes(t *testing.T) {
 		{`undefined`, false},
 	}
 	for _, tt := range tests {
-		got := isValidJSON(tt.input)
+		got := json.Valid([]byte(tt.input))
 		if got != tt.expected {
-			t.Errorf("isValidJSON(%q) = %v, want %v", tt.input, got, tt.expected)
+			t.Errorf("json.Valid(%q) = %v, want %v", tt.input, got, tt.expected)
 		}
 	}
 }
@@ -193,15 +191,15 @@ func TestGift_JSON_RoundTrip(t *testing.T) {
 	claimedBy := UserId("user1")
 
 	g := Gift{
-		Id:         "gift1",
-		Code:       "abc123def456",
-		Amount:     50.0,
-		Note:       "test gift",
-		CreatorId:  UserId("creator1"),
-		CreatedAt:  now,
-		ExpiresAt:  now + 86400000,
-		ClaimedAt:  &claimedAt,
-		ClaimedBy:  &claimedBy,
+		Id:        "gift1",
+		Code:      "abc123def456",
+		Amount:    50.0,
+		Note:      "test gift",
+		CreatorId: UserId("creator1"),
+		CreatedAt: now,
+		ExpiresAt: now + 86400000,
+		ClaimedAt: &claimedAt,
+		ClaimedBy: &claimedBy,
 	}
 
 	data, err := json.Marshal(g)
@@ -235,18 +233,18 @@ func TestKey_JSON_RoundTrip(t *testing.T) {
 	data := "some data"
 
 	k := Key{
-		Key:       "key123",
-		Creator:   UserId("creator1"),
-		Users:     map[UserId]KeyUserData{},
-		Name:      "Test Key",
-		Price:     10,
-		Type:      "subscription",
-		Webhook:   &webhook,
-		Data:      &data,
+		Key:         "key123",
+		Creator:     UserId("creator1"),
+		Users:       map[UserId]KeyUserData{},
+		Name:        "Test Key",
+		Price:       10,
+		Type:        "subscription",
+		Webhook:     &webhook,
+		Data:        &data,
 		TotalIncome: 100,
 	}
 	k.Users[UserId("user1")] = KeyUserData{
-		Time: 1700000000000,
+		Time:  1700000000000,
 		Price: 10,
 	}
 
@@ -275,16 +273,16 @@ func TestKey_JSON_RoundTrip(t *testing.T) {
 
 func TestTransaction_JSON_RoundTrip(t *testing.T) {
 	tx := Transaction{
-		Type:      "transfer",
-		User:      UserId("user1"),
-		To:        "user2",
-		Amount:    50.0,
-		Note:      "payment",
-		Timestamp: 1700000000000,
-		NewTotal:  150.0,
+		Type:       "transfer",
+		User:       UserId("user1"),
+		To:         "user2",
+		Amount:     50.0,
+		Note:       "payment",
+		Timestamp:  1700000000000,
+		NewTotal:   150.0,
 		PetitionId: "pet1",
-		KeyName:   "mykey",
-		KeyId:     "key1",
+		KeyName:    "mykey",
+		KeyId:      "key1",
 	}
 
 	data, err := json.Marshal(tx)

@@ -26,6 +26,7 @@ const (
 	PermSendFriendReq     TokenPermission = "friends:request"
 	PermAcceptFriend      TokenPermission = "friends:accept"
 	PermRemoveFriend      TokenPermission = "friends:remove"
+	PermCancelFriendReq   TokenPermission = "friends:cancel"
 	PermViewPosts         TokenPermission = "posts:view"
 	PermCreatePost        TokenPermission = "posts:create"
 	PermDeletePost        TokenPermission = "posts:delete"
@@ -83,6 +84,7 @@ func AllPermissions() []TokenPermission {
 		PermSendFriendReq,
 		PermAcceptFriend,
 		PermRemoveFriend,
+		PermCancelFriendReq,
 		PermViewPosts,
 		PermCreatePost,
 		PermDeletePost,
@@ -103,8 +105,6 @@ func AllPermissions() []TokenPermission {
 		PermJoinGroup,
 		PermLeaveGroup,
 		PermViewGroupMembers,
-		PermInviteGroup,
-		PermBanGroup,
 		PermInviteGroup,
 		PermViewNotifications,
 		PermSendNotifications,
@@ -154,7 +154,7 @@ func PermissionGroups() []PermissionGroup {
 				PermLikePost, PermReplyPost, PermRepost,
 				PermViewFollowing, PermFollow, PermUnfollow,
 				PermManageFriends, PermSendFriendReq, PermAcceptFriend,
-				PermRemoveFriend, PermViewNotifications,
+				PermRemoveFriend, PermCancelFriendReq, PermViewNotifications,
 			},
 		},
 		{

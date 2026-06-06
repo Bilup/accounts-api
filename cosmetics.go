@@ -183,7 +183,11 @@ func loadUserCosmetics(userId UserId) (*UserCosmetics, error) {
 }
 
 func saveUserCosmetics(userId UserId, uc *UserCosmetics) error {
-	return SaveUserCosmetics(userId, uc)
+	err := SaveUserCosmetics(userId, uc)
+	if err == nil {
+		InvalidateOverlayCosmeticsCache(userId)
+	}
+	return err
 }
 
 func getCatalogEntryById(id string) (*CosmeticCatalogEntry, bool) {

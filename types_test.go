@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-
 func TestUsername_ToLower(t *testing.T) {
 	u := Username("HelloWorld")
 	if u.ToLower() != "helloworld" {
@@ -19,7 +18,6 @@ func TestUsername_ToLowerAlreadyLower(t *testing.T) {
 		t.Errorf("Username.ToLower() = %q, want %q", u.ToLower(), "hello")
 	}
 }
-
 
 func TestUser_GetUsername(t *testing.T) {
 	u := User{"username": "testuser"}
@@ -147,7 +145,6 @@ func TestUser_GetEmail_Empty(t *testing.T) {
 	}
 }
 
-
 func TestUser_GetCredits(t *testing.T) {
 	u := User{"sys.currency": float64(100.5)}
 	if u.GetCredits() != 100.5 {
@@ -194,9 +191,8 @@ func TestUser_SetBalance_RoundsToTwoDecimals(t *testing.T) {
 	}
 }
 
-
 func TestUser_Blocking(t *testing.T) {
-	u := User{}
+	u := make(User)
 	u.AddBlocked("user1")
 	if !u.HasBlocked("user1") {
 		t.Error("Should have blocked user1")
@@ -211,7 +207,7 @@ func TestUser_Blocking(t *testing.T) {
 }
 
 func TestUser_AddBlocked_Idempotent(t *testing.T) {
-	u := User{}
+	u := make(User)
 	u.AddBlocked("user1")
 	u.AddBlocked("user1") // should not add duplicate
 	blocked := u.GetBlocked()
@@ -221,10 +217,9 @@ func TestUser_AddBlocked_Idempotent(t *testing.T) {
 }
 
 func TestUser_RemoveBlocked_NotBlocked(t *testing.T) {
-	u := User{}
+	u := make(User)
 	u.RemoveBlocked("nonexistent") // should not panic
 }
-
 
 func TestUser_Friends(t *testing.T) {
 	// We can't fully test AddFriend/RemoveFriend because they call username.Id()
@@ -246,7 +241,6 @@ func TestUser_GetFriends_Empty(t *testing.T) {
 	}
 }
 
-
 func TestUser_GetNotes(t *testing.T) {
 	u := User{}
 	notes := u.GetNotes()
@@ -254,7 +248,6 @@ func TestUser_GetNotes(t *testing.T) {
 		t.Errorf("GetNotes() on empty user should return empty map, got %d entries", len(notes))
 	}
 }
-
 
 func TestUser_GetStanding_Default(t *testing.T) {
 	u := User{}
@@ -318,23 +311,16 @@ func TestUser_HasStandingOrHigher(t *testing.T) {
 	if !u.HasStandingOrHigher(StandingBanned) {
 		t.Error("Good standing should pass banned check (always passes)")
 	}
-	if u.HasStandingOrHigher(StandingWarning) {
-		// good is higher than warning, so this should NOT pass
-		// Actually looking at the code: good does NOT pass warning check
-		// Wait, the code says for Warning: current == StandingGood || current == StandingWarning
-		t.Error("Good standing should not pass warning check based on code logic")
-	}
-}
-
-// Wait, let me re-read the HasStandingOrHigher code...
-// case StandingWarning: return current == StandingGood || current == StandingWarning
-// So Good DOES pass the warning check. Let me fix the test.
-
-func TestUser_HasStandingOrHigher_Correct(t *testing.T) {
-	// Override the previous test
-	u := User{"sys.standing": "good"}
 	if !u.HasStandingOrHigher(StandingWarning) {
 		t.Error("Good standing should pass warning check (good >= warning)")
+	}
+
+	u2 := User{"sys.standing": "warning"}
+	if u2.HasStandingOrHigher(StandingGood) {
+		t.Error("Warning standing should NOT pass good check")
+	}
+	if !u2.HasStandingOrHigher(StandingWarning) {
+		t.Error("Warning standing should pass warning check")
 	}
 }
 
@@ -361,7 +347,6 @@ func TestUser_Created_Empty(t *testing.T) {
 	}
 }
 
-
 func TestUser_GetTheme(t *testing.T) {
 	theme := map[string]any{"primary": "#222"}
 	u := User{"theme": theme}
@@ -379,7 +364,6 @@ func TestUser_GetTheme_Empty(t *testing.T) {
 	}
 }
 
-
 func TestUser_Has(t *testing.T) {
 	u := User{"key": "value"}
 	if !u.Has("key") {
@@ -389,7 +373,6 @@ func TestUser_Has(t *testing.T) {
 		t.Error("Has('nonexistent') should return false")
 	}
 }
-
 
 func TestUser_GetInt(t *testing.T) {
 	u := User{"count": 42}
@@ -412,7 +395,6 @@ func TestUser_GetInt_Missing(t *testing.T) {
 	}
 }
 
-
 func TestUser_GetString(t *testing.T) {
 	u := User{"name": "test"}
 	if u.GetString("name") != "test" {
@@ -434,7 +416,6 @@ func TestUser_GetString_Missing(t *testing.T) {
 	}
 }
 
-
 func TestUser_GetBlockedIps(t *testing.T) {
 	u := User{"blocked_ips": []string{"1.2.3.4", "5.6.7.8"}}
 	ips := u.GetBlockedIps()
@@ -451,7 +432,6 @@ func TestUser_GetBlockedIps_Empty(t *testing.T) {
 	}
 }
 
-
 func TestTimestamp_Time(t *testing.T) {
 	ts := Timestamp(time.Now().UnixMilli())
 	result := ts.Time()
@@ -459,7 +439,6 @@ func TestTimestamp_Time(t *testing.T) {
 		t.Error("Timestamp.Time() should not return zero time")
 	}
 }
-
 
 func TestUser_SocialLinks(t *testing.T) {
 	u := User{"sys.social_links": []string{"https://twitter.com/test", "https://github.com/test"}}
@@ -477,7 +456,6 @@ func TestUser_SetSocialLinks(t *testing.T) {
 		t.Errorf("SetSocialLinks() then GetSocialLinks() = %v, want [https://example.com]", links)
 	}
 }
-
 
 func TestGift_IsActive(t *testing.T) {
 	g := Gift{Id: "1", Code: "abc", Amount: 100}

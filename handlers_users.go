@@ -1374,10 +1374,6 @@ func transferCreditsAdmin(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "Transfer successful", "from": fromUsername, "to": toUsername, "amount": amountNum, "debited": amountNum})
 }
 
-func removeUserDirectory(path string) error {
-	return os.RemoveAll(path)
-}
-
 func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 	usernameLower := username.ToLower()
 
@@ -1461,7 +1457,7 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 
 		// Remove user storage
 		userDir := string("rotur/user_storage/" + target)
-		if err := removeUserDirectory(userDir); err != nil {
+		if err := os.RemoveAll(userDir); err != nil {
 			log.Printf("Error removing user directory %s: %v", userDir, err)
 		}
 

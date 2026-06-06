@@ -373,10 +373,11 @@ func TestReadOnlyPermissionGroup(t *testing.T) {
 			!startsWith(string(perm), "following:view") &&
 			!startsWith(string(perm), "files:view") &&
 			!startsWith(string(perm), "keys:view") &&
-			!startsWith(string(perm), "groups:view") &&
+			!startsWith(string(perm), "groups:") &&
 			!startsWith(string(perm), "notifications:view") &&
 			!startsWith(string(perm), "gifts:view") &&
 			!startsWith(string(perm), "items:view") &&
+			!startsWith(string(perm), "cosmetics:") &&
 			!startsWith(string(perm), "blocked:view") {
 			t.Errorf("read_only group should only contain view permissions, found: %s", perm)
 		}

@@ -596,7 +596,11 @@ func (u User) GetEmail() string {
 }
 
 func (u User) SetBlocked(blocked []UserId) {
-	u.Set("sys.blocked", blocked)
+	strs := make([]string, len(blocked))
+	for i, b := range blocked {
+		strs[i] = string(b)
+	}
+	u.Set("sys.blocked", strs)
 }
 
 func (u User) GetBlocked() []UserId {
@@ -668,11 +672,19 @@ func (u User) IsPrivate() bool {
 }
 
 func (u User) SetFriends(friends []UserId) {
-	u.Set("sys.friends", friends)
+	strs := make([]string, len(friends))
+	for i, f := range friends {
+		strs[i] = string(f)
+	}
+	u.Set("sys.friends", strs)
 }
 
 func (u User) SetRequests(requests []UserId) {
-	u.Set("sys.requests", requests)
+	strs := make([]string, len(requests))
+	for i, r := range requests {
+		strs[i] = string(r)
+	}
+	u.Set("sys.requests", strs)
 }
 
 func (u User) AddRequest(username Username) bool {
@@ -1055,6 +1067,7 @@ func (u User) SetSubscription(sub subscription) {
 		"tier":         sub.Tier,
 		"next_billing": sub.Next_billing,
 	})
+	InvalidateUserTierCache(u.GetUsername())
 	if u.Get("max_size") != u.GetMaxSize() {
 		u.Set("max_size", u.GetMaxSize())
 	}
@@ -1352,6 +1365,7 @@ func (s *System) Set(key string, value any) (string, error) {
 	case "name":
 		if v, ok := value.(string); ok {
 			renameSystem(s.Name, v)
+			s.Name = v
 			return v, nil
 		} else {
 			return "", fmt.Errorf("invalid name value: %v", value)
