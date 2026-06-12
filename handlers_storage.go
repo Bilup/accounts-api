@@ -84,6 +84,7 @@ func loadUsers() {
 	idToUser = idToUserInner
 	keyToUserIdx = keyToUserIdxInner
 	idToUserMutex.Unlock()
+	clearOverlayCosmeticsCache()
 	users = loaded
 }
 

@@ -903,6 +903,21 @@ func (u User) RemoveNote(username Username) {
 	u.Set("sys.notes", notes)
 }
 
+func (u User) GetNotesNet() map[Username]string {
+	notes := u.GetNotes()
+	out := make(map[Username]string, len(notes))
+	for id, note := range notes {
+		user := id.User()
+		if user == nil {
+			continue
+		}
+		if username := user.GetUsername(); username != "" {
+			out[username] = note
+		}
+	}
+	return out
+}
+
 func (u User) GetCredits() float64 {
 	mu := getMutexForUser(u)
 	mu.Lock()

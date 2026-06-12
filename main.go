@@ -118,11 +118,19 @@ func main() {
 		keys.GET("/name/:id", requiresAuth, requirePermission(PermManageKeys), setKeyName)
 		keys.GET("/update/:id", requiresAuth, requirePermission(PermManageKeys), updateKey)
 		keys.GET("/revoke/:id", requiresAuth, requirePermission(PermManageKeys), revokeKey)
+
 		keys.GET("/delete/:id", requiresAuth, requirePermission(PermManageKeys), deleteKey)
+		keys.DELETE("/delete/:id", requiresAuth, requirePermission(PermManageKeys), deleteKey)
+
 		keys.GET("/admin_add/:id", requiresAuth, requirePermission(PermManageKeys), adminAddUserToKey)
 		keys.GET("/admin_remove/:id", requiresAuth, requirePermission(PermManageKeys), adminRemoveUserFromKey)
+
 		keys.GET("/buy/:id", requiresAuth, requirePermission(PermManageKeys), buyKey)
+		keys.POST("/buy/:id", requiresAuth, requirePermission(PermManageKeys), buyKey)
+
 		keys.GET("/cancel/:id", requiresAuth, requirePermission(PermManageKeys), cancelKey)
+		keys.POST("/cancel/:id", requiresAuth, requirePermission(PermManageKeys), cancelKey)
+
 		keys.GET("/debug_subscriptions", requiresAuth, requirePermission(PermViewKeys), debugSubscriptionsEndpoint)
 	}
 
@@ -175,7 +183,7 @@ func main() {
 		me.POST("/block/:username", requiresAuth, requirePermission(PermManageBlocked), blockUser)
 		me.POST("/unblock/:username", requiresAuth, requirePermission(PermManageBlocked), unblockUser)
 
-		// notes endpoints, get not needed, stored in user["sys.notes"]
+		me.GET("/notes", requiresAuth, requirePermission(PermManageProfile), requireTier("Plus"), getNotes)
 		me.POST("/note/:username", requiresAuth, requirePermission(PermManageProfile), requireTier("Plus"), noteUser)
 		me.DELETE("/note/:username", requiresAuth, requirePermission(PermManageProfile), requireTier("Plus"), deleteNote)
 		me.GET("/able", requiresAuth, getTokenAbilities)

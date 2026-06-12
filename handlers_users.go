@@ -327,6 +327,7 @@ func userToNet(user User) User {
 	userCopy["sys.friends"] = user.GetFriendUsers()
 	userCopy["sys.requests"] = user.GetRequestedUsers()
 	userCopy["sys.blocked"] = user.GetBlockedUsers()
+	userCopy["sys.notes"] = user.GetNotesNet()
 	transactions := user.GetTransactions()
 	netTransactions := make([]TransactionNet, len(transactions))
 	for i, transaction := range transactions {
@@ -1025,6 +1026,10 @@ func updateUserAdmin(c *gin.Context) {
 
 			go saveUsers()
 
+
+			go hub.broadcastToUserConns(users[userIndex].GetId(), "key_delete", map[string]any{
+				"key": key,
+			})
 			c.JSON(200, gin.H{
 				"message":  "User key deleted successfully",
 				"username": username,
@@ -1105,7 +1110,11 @@ func deleteUserKey(c *gin.Context) {
 
 	go saveUsers()
 
-	c.JSON(204, gin.H{"message": "User key deleted successfully", "username": username, "key": key})
+	go hub.broadcastToUserConns(user.GetId(), "key_delete", map[string]any{
+		"key": key,
+	})
+
+	c.JSON(200, gin.H{"message": "User key deleted successfully", "username": username, "key": key})
 }
 
 // PerformCreditTransfer performs a credit transfer between two users.

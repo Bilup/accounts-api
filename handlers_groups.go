@@ -53,8 +53,8 @@ func createGroup(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Tag is required"})
 		return
 	}
-	if len(tag) > 20 {
-		c.JSON(400, gin.H{"error": "Tag length exceeded"})
+	if len(tag) > 10 {
+		c.JSON(400, gin.H{"error": "Tag must be 10 characters or less"})
 		return
 	}
 	re := regexp.MustCompile(`^[a-zA-Z0-9]+$`)
@@ -217,9 +217,9 @@ func createGroup(c *gin.Context) {
 		Events:          map[string]GroupEvent{},
 		Tips:            []GroupTip{},
 		BenefitProducts: map[string]GroupBenefitProduct{},
-		Invites: []GroupInvite{},
-		JoinRequests: []GroupJoinRequest{},
-		Bans: []GroupBan{},
+		Invites:         []GroupInvite{},
+		JoinRequests:    []GroupJoinRequest{},
+		Bans:            []GroupBan{},
 	}
 
 	groupsDataMutex.Lock()
@@ -551,6 +551,62 @@ func updateGroup(c *gin.Context) {
 		data.Group.EntryFee = entryFee
 	}
 
+	if newTag, ok := jsonBody["tag"].(string); ok {
+		newTag = strings.TrimSpace(newTag)
+		if newTag == "" {
+			c.JSON(400, gin.H{"error": "Tag cannot be empty"})
+			return
+		}
+		if len(newTag) > 10 {
+			c.JSON(400, gin.H{"error": "Tag must be 10 characters or less"})
+			return
+		}
+		re := regexp.MustCompile(`^[a-zA-Z0-9]+$`)
+		if !re.MatchString(newTag) {
+			c.JSON(400, gin.H{"error": "Tag must be alphanumeric only"})
+			return
+		}
+		if newTag != groupTag {
+			if _, exists := groupsData[newTag]; exists {
+				c.JSON(400, gin.H{"error": "Group with this tag already exists"})
+				return
+			}
+			oldTag := groupTag
+			data.Group.Tag = newTag
+			for i := range data.Members {
+				data.Members[i].GroupTag = newTag
+			}
+			for i := range data.Roles {
+				data.Roles[i].GroupTag = newTag
+			}
+			for i := range data.Announcements {
+				data.Announcements[i].GroupTag = newTag
+			}
+			for k, event := range data.Events {
+				event.GroupTag = newTag
+				data.Events[k] = event
+			}
+			for i := range data.Tips {
+				data.Tips[i].GroupTag = newTag
+			}
+			for k, product := range data.BenefitProducts {
+				product.GroupTag = newTag
+				data.BenefitProducts[k] = product
+			}
+			for i := range data.Invites {
+				data.Invites[i].GroupTag = newTag
+			}
+			for i := range data.JoinRequests {
+				data.JoinRequests[i].GroupTag = newTag
+			}
+			for i := range data.Bans {
+				data.Bans[i].GroupTag = newTag
+			}
+			delete(groupsData, oldTag)
+			groupsData[newTag] = data
+			groupTag = newTag
+		}
+	}
 	groupsData[groupTag] = data
 	go saveGroupData(groupTag)
 
@@ -777,11 +833,11 @@ func getGroupMembersList(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{
-		"members": results,
-		"page": page,
+		"members":  results,
+		"page":     page,
 		"per_page": perPage,
-		"total": totalMembers,
-		"pages": totalPages,
+		"total":    totalMembers,
+		"pages":    totalPages,
 	})
 }
 

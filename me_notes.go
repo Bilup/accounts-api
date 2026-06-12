@@ -2,8 +2,16 @@ package main
 
 import "github.com/gin-gonic/gin"
 
+func getNotes(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+
+	notes := user.GetNotesNet()
+
+	c.JSON(200, gin.H{"notes": notes})
+}
+
 func noteUser(c *gin.Context) {
-	username := Username(c.Param("username"))
+	username := Username(c.Param("username")).ToLower()
 	if username == "" {
 		c.JSON(400, gin.H{"error": "Username is required"})
 		return
@@ -32,7 +40,7 @@ func noteUser(c *gin.Context) {
 }
 
 func deleteNote(c *gin.Context) {
-	username := Username(c.Param("username"))
+	username := Username(c.Param("username")).ToLower()
 	if username == "" {
 		c.JSON(400, gin.H{"error": "Username is required"})
 		return

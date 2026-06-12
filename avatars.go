@@ -121,19 +121,26 @@ func getActiveOverlayCached(userId UserId) string {
 	if err == nil && uc != nil {
 		name = uc.ActiveCosmetics[CosmeticTypeOverlay]
 	}
-
-	overlayCosmeticsCacheMu.Lock()
-	if overlayCosmeticsCache == nil {
-		overlayCosmeticsCache = make(map[UserId]string)
+	if err == nil {
+		overlayCosmeticsCacheMu.Lock()
+		if overlayCosmeticsCache == nil {
+			overlayCosmeticsCache = make(map[UserId]string)
+		}
+		overlayCosmeticsCache[userId] = name
+		overlayCosmeticsCacheMu.Unlock()
 	}
-	overlayCosmeticsCache[userId] = name
-	overlayCosmeticsCacheMu.Unlock()
 	return name
 }
 
 func InvalidateOverlayCosmeticsCache(userId UserId) {
 	overlayCosmeticsCacheMu.Lock()
 	delete(overlayCosmeticsCache, userId)
+	overlayCosmeticsCacheMu.Unlock()
+}
+
+func clearOverlayCosmeticsCache() {
+	overlayCosmeticsCacheMu.Lock()
+	overlayCosmeticsCache = make(map[UserId]string)
 	overlayCosmeticsCacheMu.Unlock()
 }
 
@@ -182,7 +189,12 @@ func avatarHandler(c *gin.Context) {
 	username := Username(usernameStr)
 
 	if len(usernameStr) == 36 {
-		username = UserId(usernameStr).User().GetUsername()
+		user := UserId(usernameStr).User()
+		if user == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
+			return
+		}
+		username = user.GetUsername()
 	}
 
 	radiusStr := c.Query("radius")
@@ -401,7 +413,16 @@ func overlayHandler(c *gin.Context) {
 	username := Username(usernameStr)
 
 	if len(usernameStr) == 36 {
-		username = UserId(usernameStr).User().GetUsername()
+		user := UserId(usernameStr).User()
+		if user == nil {
+			sendEmpty(c)
+			return
+		}
+		username = user.GetUsername()
+		if username == "" {
+			sendEmpty(c)
+			return
+		}
 	}
 
 	if _, exists := getUserTierCached(username); !exists {
@@ -410,6 +431,10 @@ func overlayHandler(c *gin.Context) {
 	}
 
 	userId := username.Id()
+	if userId == "" {
+		sendEmpty(c)
+		return
+	}
 	overlayName := getActiveOverlayCached(userId)
 	if overlayName == "" {
 		sendEmpty(c)
@@ -602,7 +627,12 @@ func bannerHandler(c *gin.Context) {
 	username := Username(usernameStr)
 
 	if len(usernameStr) == 36 {
-		username = UserId(usernameStr).User().GetUsername()
+		user := UserId(usernameStr).User()
+		if user == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
+			return
+		}
+		username = user.GetUsername()
 	}
 
 	radiusStr := c.Query("radius")
