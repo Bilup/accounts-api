@@ -697,6 +697,14 @@ func updateUser(c *gin.Context) {
 		return
 	}
 	authKey := req.Auth
+	if authKey == "" {
+		authHeader := c.GetHeader("Authorization")
+		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+			authKey = authHeader[7:]
+		} else if authHeader != "" {
+			authKey = authHeader
+		}
+	}
 	key := req.Key
 	if key == "" {
 		c.JSON(400, gin.H{"error": "Key is required"})
@@ -1025,7 +1033,6 @@ func updateUserAdmin(c *gin.Context) {
 			users[userIndex].DelKey(key)
 
 			go saveUsers()
-
 
 			go hub.broadcastToUserConns(users[userIndex].GetId(), "key_delete", map[string]any{
 				"key": key,
