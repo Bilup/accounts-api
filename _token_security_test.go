@@ -35,7 +35,7 @@ func TestTokenUniqueness(t *testing.T) {
 	// Test that multiple tokens are unique
 	tokens := make(map[string]bool)
 
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		token := generateAccountToken()
 
 		if tokens[token] {
