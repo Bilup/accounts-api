@@ -8,6 +8,25 @@ import (
 	"github.com/google/uuid"
 )
 
+func stringsFromJSONValue(value any) ([]string, bool) {
+	switch v := value.(type) {
+	case []string:
+		return v, true
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
 func createAnnouncement(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 
@@ -71,8 +90,8 @@ func createAnnouncement(c *gin.Context) {
 			if isNotifyAllowed(targetUser, "group_"+groupTag, user.GetId()) {
 				sendPushNotificationToUser(targetUser, *user, NotificationRequest{
 					Source: "group_" + groupTag,
-					Title: "[" + groupTag + "] " + title,
-					Body: body,
+					Title:  "[" + groupTag + "] " + title,
+					Body:   body,
 				})
 			}
 		}
@@ -257,6 +276,158 @@ func createEvent(c *gin.Context) {
 	c.JSON(201, event)
 }
 
+func updateEvent(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+	groupTag := c.Param("grouptag")
+	eventId := c.Param("eventid")
+	if groupTag == "" || eventId == "" {
+		c.JSON(400, gin.H{"error": "Group tag and event ID are required"})
+		return
+	}
+
+	_, ok := getGroupByTag(groupTag)
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	if !hasPermission(user.GetId(), groupTag, "groups.events.manage") {
+		c.JSON(403, gin.H{"error": "You don't have permission to manage events"})
+		return
+	}
+
+	var updateData map[string]any
+	if err := c.ShouldBindJSON(&updateData); err != nil {
+		c.JSON(400, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	groupsDataMutex.Lock()
+	defer groupsDataMutex.Unlock()
+
+	data, ok := groupsData[groupTag]
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	event, ok := data.Events[eventId]
+	if !ok || event.GroupTag != groupTag {
+		c.JSON(404, gin.H{"error": "Event not found"})
+		return
+	}
+
+	if title, ok := updateData["title"].(string); ok {
+		if title == "" {
+			c.JSON(400, gin.H{"error": "Title is required"})
+			return
+		}
+		if len(title) > 100 {
+			c.JSON(400, gin.H{"error": "Title length exceeded"})
+			return
+		}
+		event.Title = title
+	}
+	if description, ok := updateData["description"].(string); ok {
+		if len(description) > 500 {
+			c.JSON(400, gin.H{"error": "Description length exceeded"})
+			return
+		}
+		event.Description = description
+	}
+	if location, ok := updateData["location"].(string); ok {
+		if len(location) > 200 {
+			c.JSON(400, gin.H{"error": "Location length exceeded"})
+			return
+		}
+		event.Location = location
+	}
+	if startTimeFloat, ok := updateData["start_time"].(float64); ok {
+		startTime := int64(startTimeFloat)
+		if startTime <= time.Now().Unix() {
+			c.JSON(400, gin.H{"error": "Invalid start time"})
+			return
+		}
+		duration := event.EndTime - event.StartTime
+		if duration <= 0 {
+			duration = 3600
+		}
+		event.StartTime = startTime
+		event.EndTime = startTime + duration
+	}
+	if durationFloat, ok := updateData["duration_hours"].(float64); ok {
+		durationHours := int64(durationFloat)
+		if durationHours <= 0 || durationHours > 72 {
+			c.JSON(400, gin.H{"error": "Invalid duration (must be 1-72 hours)"})
+			return
+		}
+		event.EndTime = event.StartTime + (durationHours * 3600)
+	}
+	if visibilityRaw, ok := updateData["visibility"].(string); ok {
+		visibility := EventVisibility(visibilityRaw)
+		if visibility != EventVisibilityMembers && visibility != EventVisibilityPublic {
+			c.JSON(400, gin.H{"error": "Invalid visibility"})
+			return
+		}
+		event.Visibility = visibility
+	}
+	if published, ok := updateData["published"].(bool); ok {
+		if published && !hasPermission(user.GetId(), groupTag, "groups.events.publish") {
+			c.JSON(403, gin.H{"error": "You don't have permission to publish events"})
+			return
+		}
+		event.Published = published
+	}
+
+	data.Events[eventId] = event
+	groupsData[groupTag] = data
+	go saveGroupData(groupTag)
+
+	c.JSON(200, event.ToNet())
+}
+
+func deleteEvent(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+	groupTag := c.Param("grouptag")
+	eventId := c.Param("eventid")
+	if groupTag == "" || eventId == "" {
+		c.JSON(400, gin.H{"error": "Group tag and event ID are required"})
+		return
+	}
+
+	_, ok := getGroupByTag(groupTag)
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	if !hasPermission(user.GetId(), groupTag, "groups.events.manage") {
+		c.JSON(403, gin.H{"error": "You don't have permission to manage events"})
+		return
+	}
+
+	groupsDataMutex.Lock()
+	defer groupsDataMutex.Unlock()
+
+	data, ok := groupsData[groupTag]
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	event, ok := data.Events[eventId]
+	if !ok || event.GroupTag != groupTag {
+		c.JSON(404, gin.H{"error": "Event not found"})
+		return
+	}
+
+	delete(data.Events, eventId)
+	groupsData[groupTag] = data
+	go saveGroupData(groupTag)
+
+	c.JSON(200, gin.H{"message": "Event deleted"})
+}
+
 func getEvents(c *gin.Context) {
 	groupTag := c.Param("grouptag")
 	if groupTag == "" {
@@ -291,7 +462,7 @@ func getEvents(c *gin.Context) {
 				results = append(results, event.ToNet())
 			case EventVisibilityMembers:
 				if isMember {
-				results = append(results, event.ToNet())
+					results = append(results, event.ToNet())
 				}
 			}
 		}
@@ -436,12 +607,12 @@ func withdrawTip(c *gin.Context) {
 	userCredits := user.GetCredits()
 	user.SetBalance(roundVal(userCredits + nAmount))
 	user.addTransaction(Transaction{
-		Note:     "Withdrawal from group " + groupTag + " tip jar",
-		User:     UserId(""),
-		Amount:   nAmount,
-		Type:     "group_tip_withdrawal",
+		Note:      "Withdrawal from group " + groupTag + " tip jar",
+		User:      UserId(""),
+		Amount:    nAmount,
+		Type:      "group_tip_withdrawal",
 		Timestamp: time.Now().UnixMilli(),
-		NewTotal: roundVal(userCredits + nAmount),
+		NewTotal:  roundVal(userCredits + nAmount),
 	})
 
 	withdrawal := GroupTipWithdrawal{
@@ -632,10 +803,20 @@ func updateRole(c *gin.Context) {
 				roles[i].SelfAssignable = selfAssignable.(bool)
 			}
 			if permissions, ok := updateData["permissions"]; ok {
-				roles[i].Permissions = permissions.([]string)
+				parsed, valid := stringsFromJSONValue(permissions)
+				if !valid {
+					c.JSON(400, gin.H{"error": "Invalid permissions"})
+					return
+				}
+				roles[i].Permissions = parsed
 			}
 			if benefits, ok := updateData["benefits"]; ok {
-				roles[i].Benefits = benefits.([]string)
+				parsed, valid := stringsFromJSONValue(benefits)
+				if !valid {
+					c.JSON(400, gin.H{"error": "Invalid benefits"})
+					return
+				}
+				roles[i].Benefits = parsed
 			}
 			break
 		}
@@ -746,13 +927,14 @@ func getUserPermissions(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
+	targetId := userIdFromParam(targetUserId)
 
 	members := getGroupMembers(groupTag)
 	var member GroupMember
 	found := false
 
 	for _, m := range members {
-		if string(m.UserId) == targetUserId {
+		if m.UserId == targetId {
 			member = m
 			found = true
 			break
@@ -804,13 +986,14 @@ func getUserRoles(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
+	targetId := userIdFromParam(targetUserId)
 
 	members := getGroupMembers(groupTag)
 	var member GroupMember
 	found := false
 
 	for _, m := range members {
-		if string(m.UserId) == targetUserId {
+		if m.UserId == targetId {
 			member = m
 			found = true
 			break
@@ -855,13 +1038,14 @@ func getUserBenefits(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
+	targetId := userIdFromParam(targetUserId)
 
 	members := getGroupMembers(groupTag)
 	var member GroupMember
 	found := false
 
 	for _, m := range members {
-		if string(m.UserId) == targetUserId {
+		if m.UserId == targetId {
 			member = m
 			found = true
 			break
@@ -948,13 +1132,14 @@ func assignRole(c *gin.Context) {
 
 	rolesMap := getGroupRolesMap(groupTag)
 	role, roleExists := rolesMap[roleId]
+	targetId := userIdFromParam(targetUserId)
 
 	if !roleExists || role.GroupTag != groupTag {
 		c.JSON(404, gin.H{"error": "Role not found"})
 		return
 	}
 
-	if role.SelfAssignable && string(user.GetId()) == targetUserId {
+	if role.SelfAssignable && user.GetId() == targetId {
 	} else if !hasPermission(user.GetId(), groupTag, "groups.roles.assign") {
 		c.JSON(403, gin.H{"error": "You don't have permission to assign roles"})
 		return
@@ -964,7 +1149,7 @@ func assignRole(c *gin.Context) {
 	found := false
 
 	for i, member := range members {
-		if string(member.UserId) == targetUserId {
+		if member.UserId == targetId {
 			found = true
 			for _, rId := range member.RoleIds {
 				if rId == roleId {
@@ -1012,6 +1197,7 @@ func removeRole(c *gin.Context) {
 
 	rolesMap := getGroupRolesMap(groupTag)
 	role, roleExists := rolesMap[roleId]
+	targetId := userIdFromParam(targetUserId)
 
 	if !roleExists || role.GroupTag != groupTag {
 		c.JSON(404, gin.H{"error": "Role not found"})
@@ -1027,7 +1213,7 @@ func removeRole(c *gin.Context) {
 	found := false
 
 	for i, member := range members {
-		if string(member.UserId) == targetUserId {
+		if member.UserId == targetId {
 			found = true
 			newRoleIds := make([]string, 0)
 			for _, rId := range member.RoleIds {

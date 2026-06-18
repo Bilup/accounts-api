@@ -213,6 +213,8 @@ func main() {
 
 		groups.GET("/:grouptag/events", requiresAuth, requirePermission(PermViewGroups), getEvents)
 		groups.POST("/:grouptag/events", requiresAuth, requirePermission(PermManageGroups), createEvent)
+		groups.PATCH("/:grouptag/events/:eventid", requiresAuth, requirePermission(PermManageGroups), updateEvent)
+		groups.DELETE("/:grouptag/events/:eventid", requiresAuth, requirePermission(PermManageGroups), deleteEvent)
 
 		groups.GET("/:grouptag/tips", requiresAuth, requirePermission(PermViewGroups), getTips)
 		groups.POST("/:grouptag/tips", requiresAuth, requirePermission(PermManageCredits), sendTip)

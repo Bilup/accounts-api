@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-
 func sendGroupInvite(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 	groupTag := c.Param("grouptag")
@@ -80,12 +79,12 @@ func sendGroupInvite(c *gin.Context) {
 	}
 
 	invite := GroupInvite{
-		Id:        uuid.New().String(),
-		GroupTag:  groupTag,
+		Id:         uuid.New().String(),
+		GroupTag:   groupTag,
 		FromUserId: user.GetId(),
-		ToUserId:  targetUserId,
-		Status:    InvitePending,
-		CreatedAt: time.Now().Unix(),
+		ToUserId:   targetUserId,
+		Status:     InvitePending,
+		CreatedAt:  time.Now().Unix(),
 	}
 
 	groupsDataMutex.Lock()
@@ -106,10 +105,10 @@ func sendGroupInvite(c *gin.Context) {
 	}()
 
 	addUserEvent(targetUserId, "group_invite", map[string]any{
-		"group_tag":   groupTag,
-		"group_name":  group.Name,
-		"from":        string(user.GetUsername()),
-		"invite_id":   invite.Id,
+		"group_tag":  groupTag,
+		"group_name": group.Name,
+		"from":       string(user.GetUsername()),
+		"invite_id":  invite.Id,
 	})
 
 	c.JSON(201, invite.ToNet())
@@ -209,11 +208,11 @@ func acceptGroupInvite(c *gin.Context) {
 	}
 
 	member := GroupMember{
-		Id:        uuid.New().String(),
-		GroupTag:  groupTag,
-		UserId:    user.GetId(),
-		RoleIds:   []string{memberRoleId},
-		JoinedAt:  time.Now().Unix(),
+		Id:                 uuid.New().String(),
+		GroupTag:           groupTag,
+		UserId:             user.GetId(),
+		RoleIds:            []string{memberRoleId},
+		JoinedAt:           time.Now().Unix(),
 		MutedAnnouncements: false,
 	}
 	data.Members = append(data.Members, member)
@@ -382,7 +381,6 @@ func getMyGroupInvites(c *gin.Context) {
 	c.JSON(200, results)
 }
 
-
 func kickGroupMember(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 	groupTag := c.Param("grouptag")
@@ -475,7 +473,6 @@ func kickGroupMember(c *gin.Context) {
 		"group":   netGroup,
 	})
 }
-
 
 func banGroupMember(c *gin.Context) {
 	user := c.MustGet("user").(*User)
@@ -719,7 +716,6 @@ func checkGroupBan(c *gin.Context) {
 
 	c.JSON(200, gin.H{"banned": false})
 }
-
 
 func requestToJoinGroup(c *gin.Context) {
 	user := c.MustGet("user").(*User)
@@ -971,11 +967,11 @@ func acceptGroupJoinRequest(c *gin.Context) {
 	}
 
 	member := GroupMember{
-		Id:        uuid.New().String(),
-		GroupTag:  groupTag,
-		UserId:    targetUserId,
-		RoleIds:   []string{memberRoleId},
-		JoinedAt:  time.Now().Unix(),
+		Id:                 uuid.New().String(),
+		GroupTag:           groupTag,
+		UserId:             targetUserId,
+		RoleIds:            []string{memberRoleId},
+		JoinedAt:           time.Now().Unix(),
 		MutedAnnouncements: false,
 	}
 	data.Members = append(data.Members, member)
@@ -1081,7 +1077,6 @@ func declineGroupJoinRequest(c *gin.Context) {
 
 	c.JSON(200, gin.H{"message": "Join request declined"})
 }
-
 
 func transferGroupOwnership(c *gin.Context) {
 	user := c.MustGet("user").(*User)
@@ -1194,7 +1189,6 @@ func transferGroupOwnership(c *gin.Context) {
 		"group":   netGroup,
 	})
 }
-
 
 func getGroupMemberInfo(c *gin.Context) {
 	groupTag := c.Param("grouptag")

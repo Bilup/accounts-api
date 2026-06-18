@@ -21,19 +21,23 @@ func (w GroupTipWithdrawal) ToNet() GroupTipWithdrawalNet {
 }
 
 type GroupInviteNet struct {
-	Id             string       `json:"id"`
-	GroupTag       string       `json:"group_tag"`
-	FromUsername   Username     `json:"from_username"`
-	ToUsername     Username     `json:"to_username"`
-	Status         InviteStatus `json:"status"`
-	CreatedAt      int64        `json:"created_at"`
+	Id           string       `json:"id"`
+	GroupTag     string       `json:"group_tag"`
+	FromUserId   UserId       `json:"from_user_id"`
+	FromUsername Username     `json:"from_username"`
+	ToUserId     UserId       `json:"to_user_id"`
+	ToUsername   Username     `json:"to_username"`
+	Status       InviteStatus `json:"status"`
+	CreatedAt    int64        `json:"created_at"`
 }
 
 func (i GroupInvite) ToNet() GroupInviteNet {
 	return GroupInviteNet{
 		Id:           i.Id,
 		GroupTag:     i.GroupTag,
+		FromUserId:   i.FromUserId,
 		FromUsername: i.FromUserId.User().GetUsername(),
+		ToUserId:     i.ToUserId,
 		ToUsername:   i.ToUserId.User().GetUsername(),
 		Status:       i.Status,
 		CreatedAt:    i.CreatedAt,
@@ -41,18 +45,20 @@ func (i GroupInvite) ToNet() GroupInviteNet {
 }
 
 type GroupJoinRequestNet struct {
-	Id         string        `json:"id"`
-	GroupTag   string        `json:"group_tag"`
-	Username   Username      `json:"username"`
-	Message    string        `json:"message"`
-	Status     RequestStatus `json:"status"`
-	CreatedAt  int64         `json:"created_at"`
+	Id        string        `json:"id"`
+	GroupTag  string        `json:"group_tag"`
+	UserId    UserId        `json:"user_id"`
+	Username  Username      `json:"username"`
+	Message   string        `json:"message"`
+	Status    RequestStatus `json:"status"`
+	CreatedAt int64         `json:"created_at"`
 }
 
 func (r GroupJoinRequest) ToNet() GroupJoinRequestNet {
 	return GroupJoinRequestNet{
 		Id:        r.Id,
 		GroupTag:  r.GroupTag,
+		UserId:    r.UserId,
 		Username:  r.UserId.User().GetUsername(),
 		Message:   r.Message,
 		Status:    r.Status,
@@ -61,19 +67,23 @@ func (r GroupJoinRequest) ToNet() GroupJoinRequestNet {
 }
 
 type GroupBanNet struct {
-	Id           string  `json:"id"`
-	GroupTag     string  `json:"group_tag"`
+	Id           string   `json:"id"`
+	GroupTag     string   `json:"group_tag"`
+	UserId       UserId   `json:"user_id"`
 	Username     Username `json:"username"`
+	BannedById   UserId   `json:"banned_by_id"`
 	BannedByUser Username `json:"banned_by"`
-	Reason       string  `json:"reason"`
-	CreatedAt    int64   `json:"created_at"`
+	Reason       string   `json:"reason"`
+	CreatedAt    int64    `json:"created_at"`
 }
 
 func (b GroupBan) ToNet() GroupBanNet {
 	return GroupBanNet{
 		Id:           b.Id,
 		GroupTag:     b.GroupTag,
+		UserId:       b.UserId,
 		Username:     b.UserId.User().GetUsername(),
+		BannedById:   b.BannedBy,
 		BannedByUser: b.BannedBy.User().GetUsername(),
 		Reason:       b.Reason,
 		CreatedAt:    b.CreatedAt,
@@ -81,21 +91,23 @@ func (b GroupBan) ToNet() GroupBanNet {
 }
 
 type GroupMemberNet struct {
-	Id              string   `json:"id"`
-	GroupTag        string   `json:"group_tag"`
-	Username        Username `json:"username"`
-	RoleIds         []string `json:"role_ids"`
-	JoinedAt        int64    `json:"joined_at"`
-	MutedAnnouncements bool  `json:"muted_announcements"`
+	Id                 string   `json:"id"`
+	GroupTag           string   `json:"group_tag"`
+	UserId             UserId   `json:"user_id"`
+	Username           Username `json:"username"`
+	RoleIds            []string `json:"role_ids"`
+	JoinedAt           int64    `json:"joined_at"`
+	MutedAnnouncements bool     `json:"muted_announcements"`
 }
 
 func (m GroupMember) ToNet() GroupMemberNet {
 	return GroupMemberNet{
-		Id:              m.Id,
-		GroupTag:        m.GroupTag,
-		Username:        m.UserId.User().GetUsername(),
-		RoleIds:         m.RoleIds,
-		JoinedAt:        m.JoinedAt,
+		Id:                 m.Id,
+		GroupTag:           m.GroupTag,
+		UserId:             m.UserId,
+		Username:           m.UserId.User().GetUsername(),
+		RoleIds:            m.RoleIds,
+		JoinedAt:           m.JoinedAt,
 		MutedAnnouncements: m.MutedAnnouncements,
 	}
 }
@@ -105,7 +117,7 @@ type GroupAnnouncementNet struct {
 	GroupTag       string   `json:"group_tag"`
 	Title          string   `json:"title"`
 	Body           string   `json:"body"`
-	AuthorUsername  Username `json:"author_username"`
+	AuthorUsername Username `json:"author_username"`
 	CreatedAt      int64    `json:"created_at"`
 	PingMembers    bool     `json:"ping_members"`
 }
@@ -116,7 +128,7 @@ func (a GroupAnnouncement) ToNet() GroupAnnouncementNet {
 		GroupTag:       a.GroupTag,
 		Title:          a.Title,
 		Body:           a.Body,
-		AuthorUsername:  a.AuthorUserId.User().GetUsername(),
+		AuthorUsername: a.AuthorUserId.User().GetUsername(),
 		CreatedAt:      a.CreatedAt,
 		PingMembers:    a.PingMembers,
 	}

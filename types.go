@@ -49,6 +49,13 @@ func (u UserId) User() User {
 	return idToUser[u]
 }
 
+func userIdFromParam(param string) UserId {
+	if user, err := getAccountByUsername(param); err == nil {
+		return user.GetId()
+	}
+	return UserId(param)
+}
+
 type Timestamp int64
 
 func (t Timestamp) Time() time.Time {
@@ -297,6 +304,7 @@ func (g Group) ToNet() GroupNet {
 
 func (g *Group) ToPublic() GroupPublic {
 	return GroupPublic{
+		Id:             g.Id,
 		Tag:            g.Tag,
 		Name:           g.Name,
 		Description:    g.Description,

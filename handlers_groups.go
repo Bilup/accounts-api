@@ -237,11 +237,7 @@ func createGroup(c *gin.Context) {
 }
 
 func searchGroups(c *gin.Context) {
-	query := c.Query("query")
-	if query == "" {
-		c.JSON(400, gin.H{"error": "Query is required"})
-		return
-	}
+	query := strings.ToLower(strings.TrimSpace(c.Query("query")))
 
 	groupsDataMutex.RLock()
 	defer groupsDataMutex.RUnlock()
@@ -251,8 +247,10 @@ func searchGroups(c *gin.Context) {
 		if !data.Group.Public {
 			continue
 		}
-		if strings.Contains(strings.ToLower(data.Group.Name), strings.ToLower(query)) ||
-			strings.Contains(strings.ToLower(data.Group.Description), strings.ToLower(query)) {
+		if query == "" ||
+			strings.Contains(strings.ToLower(data.Group.Tag), query) ||
+			strings.Contains(strings.ToLower(data.Group.Name), query) ||
+			strings.Contains(strings.ToLower(data.Group.Description), query) {
 			netGroup := data.Group.ToNet()
 			netGroup.MemberCount = len(data.Members)
 			results = append(results, netGroup)
@@ -313,7 +311,6 @@ func joinGroup(c *gin.Context) {
 		}
 	}
 
-	// If invite-only, consume the invite
 	if group.JoinPolicy == JoinPolicyInvite {
 		groupsDataMutex.Lock()
 		data = groupsData[groupTag]
@@ -332,28 +329,6 @@ func joinGroup(c *gin.Context) {
 			return
 		}
 		go saveGroupData(groupTag)
-	}
-
-	if group.JoinPolicy == JoinPolicyInvite {
-		// Check if user has a pending invite
-		groupsDataMutex.RLock()
-		data, ok := groupsData[groupTag]
-		groupsDataMutex.RUnlock()
-		if !ok {
-			c.JSON(404, gin.H{"error": "Group not found"})
-			return
-		}
-		hasInvite := false
-		for _, inv := range data.Invites {
-			if inv.ToUserId == id && inv.Status == InvitePending {
-				hasInvite = true
-				break
-			}
-		}
-		if !hasInvite {
-			c.JSON(403, gin.H{"error": "This group is invite-only and you don't have a pending invite"})
-			return
-		}
 	}
 
 	if group.JoinPolicy == JoinPolicyRequest {
@@ -507,15 +482,31 @@ func updateGroup(c *gin.Context) {
 		return
 	}
 
-	groupsDataMutex.Lock()
-	defer groupsDataMutex.Unlock()
-
-	data := groupsData[groupTag]
-	if data.Group.OwnerUserId != user.GetId() {
+	group, _ := getGroupByTag(groupTag)
+	if group.OwnerUserId != user.GetId() &&
+		!hasPermission(user.GetId(), groupTag, "groups.group.edit") &&
+		!hasPermission(user.GetId(), groupTag, "groups.manage") {
 		c.JSON(403, gin.H{"error": "You are not authorized to update this group"})
 		return
 	}
 
+	groupsDataMutex.Lock()
+	defer groupsDataMutex.Unlock()
+
+	data := groupsData[groupTag]
+
+	if name, ok := jsonBody["name"].(string); ok {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			c.JSON(400, gin.H{"error": "Name cannot be empty"})
+			return
+		}
+		if len(name) > 50 {
+			c.JSON(400, gin.H{"error": "Name length exceeded"})
+			return
+		}
+		data.Group.Name = name
+	}
 	if description, ok := jsonBody["description"].(string); ok {
 		data.Group.Description = description
 	}
@@ -536,12 +527,23 @@ func updateGroup(c *gin.Context) {
 	if icon, ok := jsonBody["icon"].(string); ok {
 		data.Group.IconUrl = icon
 	}
+	if icon, ok := jsonBody["icon_url"].(string); ok {
+		data.Group.IconUrl = icon
+	}
+	if banner, ok := jsonBody["banner_url"].(string); ok {
+		data.Group.BannerUrl = banner
+	}
 
 	if public, ok := jsonBody["public"].(bool); ok {
 		data.Group.Public = public
 	}
 	if joinPolicy, ok := jsonBody["join_policy"].(string); ok {
-		data.Group.JoinPolicy = JoinPolicy(joinPolicy)
+		policy := JoinPolicy(joinPolicy)
+		if policy != JoinPolicyOpen && policy != JoinPolicyRequest && policy != JoinPolicyInvite {
+			c.JSON(400, gin.H{"error": "Invalid join policy"})
+			return
+		}
+		data.Group.JoinPolicy = policy
 	}
 	if entryFee, ok := jsonBody["entry_fee"].(float64); ok {
 		if entryFee < 0 {
@@ -882,7 +884,9 @@ func uploadGroupIcon(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
-	if group.OwnerUserId != user.GetId() {
+	if group.OwnerUserId != user.GetId() &&
+		!hasPermission(user.GetId(), groupTag, "groups.group.edit") &&
+		!hasPermission(user.GetId(), groupTag, "groups.manage") {
 		c.JSON(403, gin.H{"error": "You are not authorized to update this group"})
 		return
 	}
@@ -957,7 +961,9 @@ func uploadGroupBanner(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
-	if group.OwnerUserId != user.GetId() {
+	if group.OwnerUserId != user.GetId() &&
+		!hasPermission(user.GetId(), groupTag, "groups.group.edit") &&
+		!hasPermission(user.GetId(), groupTag, "groups.manage") {
 		c.JSON(403, gin.H{"error": "You are not authorized to update this group"})
 		return
 	}
