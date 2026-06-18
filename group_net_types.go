@@ -167,6 +167,7 @@ type GroupTipNet struct {
 	GroupTag      string   `json:"group_tag"`
 	FromUsername  Username `json:"from_username"`
 	AmountCredits float64  `json:"amount_credits"`
+	Note          string   `json:"note"`
 	CreatedAt     int64    `json:"created_at"`
 }
 
@@ -176,6 +177,89 @@ func (t GroupTip) ToNet() GroupTipNet {
 		GroupTag:      t.GroupTag,
 		FromUsername:  t.FromUserId.User().GetUsername(),
 		AmountCredits: t.AmountCredits,
+		Note:          t.Note,
 		CreatedAt:     t.CreatedAt,
+	}
+}
+
+type GroupBenefitProductNet struct {
+	Id             string  `json:"id"`
+	GroupTag       string  `json:"group_tag"`
+	Name           string  `json:"name"`
+	Description    string  `json:"description"`
+	PriceCredits   float64 `json:"price_credits"`
+	RoleGrantedId  string  `json:"role_granted_id,omitempty"`
+	RoleName       string  `json:"role_name,omitempty"`
+	BenefitGranted string  `json:"benefit_granted,omitempty"`
+	Subscription   bool    `json:"subscription"`
+	Frequency      int     `json:"frequency,omitempty"`
+	Period         string  `json:"period,omitempty"`
+}
+
+func (p GroupBenefitProduct) ToNet() GroupBenefitProductNet {
+	roleName := ""
+	if p.RoleGrantedId != "" {
+		rolesMap := getGroupRolesMap(p.GroupTag)
+		if role, ok := rolesMap[p.RoleGrantedId]; ok {
+			roleName = role.Name
+		}
+	}
+	return GroupBenefitProductNet{
+		Id:             p.Id,
+		GroupTag:       p.GroupTag,
+		Name:           p.Name,
+		Description:    p.Description,
+		PriceCredits:   p.PriceCredits,
+		RoleGrantedId:  p.RoleGrantedId,
+		RoleName:       roleName,
+		BenefitGranted: p.BenefitGranted,
+		Subscription:   p.Subscription,
+		Frequency:      p.Frequency,
+		Period:         p.Period,
+	}
+}
+
+type GroupProductSubscriptionNet struct {
+	Id          string   `json:"id"`
+	GroupTag    string   `json:"group_tag"`
+	ProductId   string   `json:"product_id"`
+	ProductName string   `json:"product_name"`
+	Username    Username `json:"username"`
+	RoleId      string   `json:"role_id"`
+	RoleName    string   `json:"role_name"`
+	StartedAt   int64    `json:"started_at"`
+	NextBilling int64    `json:"next_billing"`
+	CancelAt    *int64   `json:"cancel_at,omitempty"`
+	Active      bool     `json:"active"`
+}
+
+func (s GroupProductSubscription) ToNet() GroupProductSubscriptionNet {
+	productName := ""
+	roleName := ""
+	groupsDataMutex.RLock()
+	if data, ok := groupsData[s.GroupTag]; ok {
+		if p, ok := data.BenefitProducts[s.ProductId]; ok {
+			productName = p.Name
+		}
+		for _, role := range data.Roles {
+			if role.Id == s.RoleId {
+				roleName = role.Name
+				break
+			}
+		}
+	}
+	groupsDataMutex.RUnlock()
+	return GroupProductSubscriptionNet{
+		Id:          s.Id,
+		GroupTag:    s.GroupTag,
+		ProductId:   s.ProductId,
+		ProductName: productName,
+		Username:    s.UserId.User().GetUsername(),
+		RoleId:      s.RoleId,
+		RoleName:    roleName,
+		StartedAt:   s.StartedAt,
+		NextBilling: s.NextBilling,
+		CancelAt:    s.CancelAt,
+		Active:      s.Active,
 	}
 }

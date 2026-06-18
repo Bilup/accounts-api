@@ -862,6 +862,7 @@ func checkSubscriptions() {
 		if usersDirty {
 			go saveUsers()
 		}
+		processGroupProductSubscriptions()
 
 		log.Printf("Subscription check completed: %d keys with subscriptions checked, %d charges processed", subscriptionsProcessed, chargesProcessed)
 

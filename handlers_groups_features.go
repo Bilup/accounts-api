@@ -2,6 +2,7 @@ package main
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -486,6 +487,11 @@ func sendTip(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Invalid amount"})
 		return
 	}
+	note := c.Query("note")
+	if len(note) > 200 {
+		c.JSON(400, gin.H{"error": "Note length exceeded (max 200)"})
+		return
+	}
 
 	group, ok := getGroupByTag(groupTag)
 	if !ok {
@@ -529,12 +535,539 @@ func sendTip(c *gin.Context) {
 		GroupTag:      groupTag,
 		FromUserId:    user.GetId(),
 		AmountCredits: nAmount,
+		Note:          note,
 		CreatedAt:     time.Now().Unix(),
 	}
 	addGroupTip(groupTag, tip)
 	go saveUsers()
 
 	c.JSON(201, tip)
+}
+
+func getGroupProducts(c *gin.Context) {
+	groupTag := c.Param("grouptag")
+	if groupTag == "" {
+		c.JSON(400, gin.H{"error": "Group tag is required"})
+		return
+	}
+
+	_, ok := getGroupByTag(groupTag)
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	groupsDataMutex.RLock()
+	data, ok := groupsData[groupTag]
+	groupsDataMutex.RUnlock()
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	results := make([]GroupBenefitProductNet, 0, len(data.BenefitProducts))
+	for _, product := range data.BenefitProducts {
+		results = append(results, product.ToNet())
+	}
+
+	c.JSON(200, results)
+}
+
+func nextGroupBillingTime(frequency int, period string) int64 {
+	if frequency <= 0 {
+		frequency = 1
+	}
+	now := time.Now()
+	switch strings.ToLower(period) {
+	case "day":
+		return now.AddDate(0, 0, frequency).UnixMilli()
+	case "week":
+		return now.AddDate(0, 0, frequency*7).UnixMilli()
+	case "year":
+		return now.AddDate(frequency, 0, 0).UnixMilli()
+	default:
+		return now.AddDate(0, frequency, 0).UnixMilli()
+	}
+}
+
+func createGroupProduct(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+	groupTag := c.Param("grouptag")
+	if groupTag == "" {
+		c.JSON(400, gin.H{"error": "Group tag is required"})
+		return
+	}
+
+	_, ok := getGroupByTag(groupTag)
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	if !hasPermission(user.GetId(), groupTag, "groups.roles.manage") {
+		c.JSON(403, gin.H{"error": "You don't have permission to manage role products"})
+		return
+	}
+
+	name := c.Query("name")
+	if name == "" {
+		c.JSON(400, gin.H{"error": "Name is required"})
+		return
+	}
+	if len(name) > 50 {
+		c.JSON(400, gin.H{"error": "Name length exceeded"})
+		return
+	}
+
+	description := c.Query("description")
+	if len(description) > 200 {
+		c.JSON(400, gin.H{"error": "Description length exceeded"})
+		return
+	}
+
+	price, err := strconv.ParseFloat(c.Query("price_credits"), 64)
+	if err != nil || price <= 0 {
+		c.JSON(400, gin.H{"error": "Invalid price"})
+		return
+	}
+	subscription := c.DefaultQuery("subscription", "false") == "true"
+	frequency := 0
+	period := ""
+	if subscription {
+		frequency, err = strconv.Atoi(c.DefaultQuery("frequency", "1"))
+		if err != nil || frequency <= 0 {
+			c.JSON(400, gin.H{"error": "Invalid frequency"})
+			return
+		}
+		period = strings.ToLower(c.DefaultQuery("period", "month"))
+		if period != "day" && period != "week" && period != "month" && period != "year" {
+			c.JSON(400, gin.H{"error": "Invalid period"})
+			return
+		}
+	}
+
+	roleId := c.Query("role_id")
+	if roleId == "" {
+		c.JSON(400, gin.H{"error": "Role ID is required"})
+		return
+	}
+
+	rolesMap := getGroupRolesMap(groupTag)
+	role, roleExists := rolesMap[roleId]
+	if !roleExists || role.GroupTag != groupTag {
+		c.JSON(404, gin.H{"error": "Role not found"})
+		return
+	}
+	if role.Name == "Owner" {
+		c.JSON(400, gin.H{"error": "Owner role cannot be sold"})
+		return
+	}
+
+	product := GroupBenefitProduct{
+		Id:            uuid.New().String(),
+		GroupTag:      groupTag,
+		Name:          name,
+		Description:   description,
+		PriceCredits:  roundVal(price),
+		RoleGrantedId: roleId,
+		Subscription:  subscription,
+		Frequency:     frequency,
+		Period:        period,
+	}
+
+	groupsDataMutex.Lock()
+	data, ok := groupsData[groupTag]
+	if !ok {
+		groupsDataMutex.Unlock()
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+	if data.BenefitProducts == nil {
+		data.BenefitProducts = make(map[string]GroupBenefitProduct)
+	}
+	if data.ProductSubscriptions == nil {
+		data.ProductSubscriptions = make(map[string]GroupProductSubscription)
+	}
+	data.BenefitProducts[product.Id] = product
+	groupsData[groupTag] = data
+	groupsDataMutex.Unlock()
+	go saveGroupData(groupTag)
+
+	c.JSON(201, product.ToNet())
+}
+
+func deleteGroupProduct(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+	groupTag := c.Param("grouptag")
+	productId := c.Param("productid")
+	if groupTag == "" || productId == "" {
+		c.JSON(400, gin.H{"error": "Group tag and product ID are required"})
+		return
+	}
+
+	_, ok := getGroupByTag(groupTag)
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	if !hasPermission(user.GetId(), groupTag, "groups.roles.manage") {
+		c.JSON(403, gin.H{"error": "You don't have permission to manage role products"})
+		return
+	}
+
+	groupsDataMutex.Lock()
+	data, ok := groupsData[groupTag]
+	if !ok {
+		groupsDataMutex.Unlock()
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+	if _, ok := data.BenefitProducts[productId]; !ok {
+		groupsDataMutex.Unlock()
+		c.JSON(404, gin.H{"error": "Product not found"})
+		return
+	}
+	delete(data.BenefitProducts, productId)
+	groupsData[groupTag] = data
+	groupsDataMutex.Unlock()
+	go saveGroupData(groupTag)
+
+	c.JSON(200, gin.H{"message": "Product deleted"})
+}
+
+func purchaseGroupProduct(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+	groupTag := c.Param("grouptag")
+	productId := c.Param("productid")
+	if groupTag == "" || productId == "" {
+		c.JSON(400, gin.H{"error": "Group tag and product ID are required"})
+		return
+	}
+
+	group, ok := getGroupByTag(groupTag)
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	userId := user.GetId()
+	groupsDataMutex.Lock()
+	data, ok := groupsData[groupTag]
+	if !ok {
+		groupsDataMutex.Unlock()
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+
+	product, ok := data.BenefitProducts[productId]
+	if !ok {
+		groupsDataMutex.Unlock()
+		c.JSON(404, gin.H{"error": "Product not found"})
+		return
+	}
+
+	memberIdx := -1
+	for i, member := range data.Members {
+		if member.UserId == userId {
+			memberIdx = i
+			break
+		}
+	}
+	if memberIdx == -1 {
+		groupsDataMutex.Unlock()
+		c.JSON(403, gin.H{"error": "You must be a member to purchase this role"})
+		return
+	}
+
+	if product.RoleGrantedId == "" {
+		groupsDataMutex.Unlock()
+		c.JSON(400, gin.H{"error": "Product does not grant a role"})
+		return
+	}
+
+	roleExists := false
+	for _, role := range data.Roles {
+		if role.Id == product.RoleGrantedId && role.GroupTag == groupTag {
+			roleExists = true
+			break
+		}
+	}
+	if !roleExists {
+		groupsDataMutex.Unlock()
+		c.JSON(404, gin.H{"error": "Role no longer exists"})
+		return
+	}
+
+	for _, roleId := range data.Members[memberIdx].RoleIds {
+		if roleId == product.RoleGrantedId {
+			groupsDataMutex.Unlock()
+			c.JSON(400, gin.H{"error": "You already have this role"})
+			return
+		}
+	}
+	if product.Subscription {
+		for _, sub := range data.ProductSubscriptions {
+			if sub.UserId == userId && sub.ProductId == product.Id && sub.Active {
+				groupsDataMutex.Unlock()
+				c.JSON(400, gin.H{"error": "You already have this subscription"})
+				return
+			}
+		}
+	}
+
+	userCredits := user.GetCredits()
+	if userCredits < product.PriceCredits {
+		groupsDataMutex.Unlock()
+		c.JSON(400, gin.H{"error": "Insufficient funds", "required": product.PriceCredits, "available": userCredits})
+		return
+	}
+
+	user.SetBalance(roundVal(userCredits - product.PriceCredits))
+	user.addTransaction(Transaction{
+		Note:      "Purchased role product " + product.Name + " from group " + groupTag,
+		User:      UserId(""),
+		Amount:    product.PriceCredits,
+		Type:      "group_role_purchase",
+		Timestamp: time.Now().UnixMilli(),
+		NewTotal:  roundVal(userCredits - product.PriceCredits),
+	})
+
+	data.Members[memberIdx].RoleIds = append(data.Members[memberIdx].RoleIds, product.RoleGrantedId)
+	var sub *GroupProductSubscription
+	if product.Subscription {
+		if data.ProductSubscriptions == nil {
+			data.ProductSubscriptions = make(map[string]GroupProductSubscription)
+		}
+		newSub := GroupProductSubscription{
+			Id:          uuid.New().String(),
+			GroupTag:    groupTag,
+			ProductId:   product.Id,
+			UserId:      userId,
+			RoleId:      product.RoleGrantedId,
+			StartedAt:   time.Now().UnixMilli(),
+			NextBilling: nextGroupBillingTime(product.Frequency, product.Period),
+			Active:      true,
+		}
+		data.ProductSubscriptions[newSub.Id] = newSub
+		sub = &newSub
+	}
+	data.Group.CreditsBalance = roundVal(data.Group.CreditsBalance + product.PriceCredits)
+	groupsData[groupTag] = data
+	groupsDataMutex.Unlock()
+
+	go saveGroupData(groupTag)
+	go saveUsers()
+
+	netGroup := group.ToNet()
+	netGroup.CreditsBalance = roundVal(group.CreditsBalance + product.PriceCredits)
+	netGroup.MemberCount = len(data.Members)
+	c.JSON(200, gin.H{
+		"message": "Product purchased",
+		"product": product.ToNet(),
+		"subscription": func() any {
+			if sub == nil {
+				return nil
+			}
+			return sub.ToNet()
+		}(),
+		"group": netGroup,
+	})
+}
+
+func checkGroupProductOwnership(c *gin.Context) {
+	groupTag := c.Param("grouptag")
+	productId := c.Param("productid")
+	username := c.Param("username")
+	if groupTag == "" || productId == "" || username == "" {
+		c.JSON(400, gin.H{"error": "Group tag, product ID, and username are required"})
+		return
+	}
+	userId := userIdFromParam(username)
+
+	groupsDataMutex.RLock()
+	data, ok := groupsData[groupTag]
+	if !ok {
+		groupsDataMutex.RUnlock()
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+	product, ok := data.BenefitProducts[productId]
+	if !ok {
+		groupsDataMutex.RUnlock()
+		c.JSON(404, gin.H{"error": "Product not found"})
+		return
+	}
+	owned := false
+	for _, member := range data.Members {
+		if member.UserId != userId {
+			continue
+		}
+		for _, roleId := range member.RoleIds {
+			if roleId == product.RoleGrantedId {
+				owned = true
+				break
+			}
+		}
+	}
+	var sub *GroupProductSubscription
+	for _, s := range data.ProductSubscriptions {
+		if s.UserId == userId && s.ProductId == productId && s.Active {
+			copySub := s
+			sub = &copySub
+			break
+		}
+	}
+	groupsDataMutex.RUnlock()
+
+	c.JSON(200, gin.H{
+		"owned":     owned,
+		"username":  username,
+		"group_tag": groupTag,
+		"product":   product.ToNet(),
+		"subscription": func() any {
+			if sub == nil {
+				return nil
+			}
+			return sub.ToNet()
+		}(),
+	})
+}
+
+func getMyGroupProductSubscriptions(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+	userId := user.GetId()
+	groupsDataMutex.RLock()
+	results := make([]GroupProductSubscriptionNet, 0)
+	for _, data := range groupsData {
+		for _, sub := range data.ProductSubscriptions {
+			if sub.UserId == userId && sub.Active {
+				results = append(results, sub.ToNet())
+			}
+		}
+	}
+	groupsDataMutex.RUnlock()
+	c.JSON(200, results)
+}
+
+func cancelGroupProductSubscription(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+	groupTag := c.Param("grouptag")
+	productId := c.Param("productid")
+	if groupTag == "" || productId == "" {
+		c.JSON(400, gin.H{"error": "Group tag and product ID are required"})
+		return
+	}
+	userId := user.GetId()
+	groupsDataMutex.Lock()
+	data, ok := groupsData[groupTag]
+	if !ok {
+		groupsDataMutex.Unlock()
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return
+	}
+	for id, sub := range data.ProductSubscriptions {
+		if sub.UserId == userId && sub.ProductId == productId && sub.Active {
+			cancelAt := sub.NextBilling
+			sub.CancelAt = &cancelAt
+			data.ProductSubscriptions[id] = sub
+			groupsData[groupTag] = data
+			groupsDataMutex.Unlock()
+			go saveGroupData(groupTag)
+			c.JSON(200, gin.H{"status": "Cancellation scheduled", "cancel_at": cancelAt, "subscription": sub.ToNet()})
+			return
+		}
+	}
+	groupsDataMutex.Unlock()
+	c.JSON(404, gin.H{"error": "Active subscription not found"})
+}
+
+func removeRoleId(roleIds []string, roleId string) []string {
+	out := make([]string, 0, len(roleIds))
+	for _, id := range roleIds {
+		if id != roleId {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func processGroupProductSubscriptions() {
+	now := time.Now().UnixMilli()
+	usersDirty := false
+	groupsDirty := make(map[string]bool)
+
+	groupsDataMutex.Lock()
+	for groupTag, data := range groupsData {
+		if data.ProductSubscriptions == nil {
+			continue
+		}
+		for subId, sub := range data.ProductSubscriptions {
+			if !sub.Active || sub.NextBilling <= 0 || sub.NextBilling > now {
+				continue
+			}
+
+			if sub.CancelAt != nil && *sub.CancelAt <= now {
+				sub.Active = false
+				data.ProductSubscriptions[subId] = sub
+				for i := range data.Members {
+					if data.Members[i].UserId == sub.UserId {
+						data.Members[i].RoleIds = removeRoleId(data.Members[i].RoleIds, sub.RoleId)
+						break
+					}
+				}
+				groupsDirty[groupTag] = true
+				continue
+			}
+
+			product, ok := data.BenefitProducts[sub.ProductId]
+			if !ok || !product.Subscription {
+				sub.Active = false
+				data.ProductSubscriptions[subId] = sub
+				groupsDirty[groupTag] = true
+				continue
+			}
+
+			purchaser, err := getAccountByUserId(sub.UserId)
+			if err != nil || purchaser.GetCredits() < product.PriceCredits {
+				sub.Active = false
+				data.ProductSubscriptions[subId] = sub
+				for i := range data.Members {
+					if data.Members[i].UserId == sub.UserId {
+						data.Members[i].RoleIds = removeRoleId(data.Members[i].RoleIds, sub.RoleId)
+						break
+					}
+				}
+				groupsDirty[groupTag] = true
+				continue
+			}
+
+			newBalance := roundVal(purchaser.GetCredits() - product.PriceCredits)
+			purchaser.SetBalance(newBalance)
+			purchaser.addTransaction(Transaction{
+				Note:      "Group role subscription " + product.Name + " for " + groupTag,
+				User:      UserId(""),
+				Amount:    product.PriceCredits,
+				Type:      "group_role_subscription",
+				Timestamp: time.Now().UnixMilli(),
+				NewTotal:  newBalance,
+			})
+			usersDirty = true
+			data.Group.CreditsBalance = roundVal(data.Group.CreditsBalance + product.PriceCredits)
+			sub.NextBilling = nextGroupBillingTime(product.Frequency, product.Period)
+			data.ProductSubscriptions[subId] = sub
+			groupsDirty[groupTag] = true
+		}
+		groupsData[groupTag] = data
+	}
+	groupsDataMutex.Unlock()
+
+	for groupTag := range groupsDirty {
+		go saveGroupData(groupTag)
+	}
+	if usersDirty {
+		go saveUsers()
+	}
 }
 
 func getTips(c *gin.Context) {

@@ -221,6 +221,14 @@ func main() {
 		groups.POST("/:grouptag/tips/withdraw", requiresAuth, requirePermission(PermManageCredits), withdrawTip)
 		groups.GET("/:grouptag/tips/withdrawals", requiresAuth, requirePermission(PermViewGroups), getWithdrawals)
 
+		groups.GET("/:grouptag/products", requiresAuth, requirePermission(PermViewGroups), getGroupProducts)
+		groups.POST("/:grouptag/products", requiresAuth, requirePermission(PermManageGroups), createGroupProduct)
+		groups.DELETE("/:grouptag/products/:productid", requiresAuth, requirePermission(PermManageGroups), deleteGroupProduct)
+		groups.POST("/:grouptag/products/:productid/purchase", requiresAuth, requirePermission(PermManageCredits), purchaseGroupProduct)
+		groups.POST("/:grouptag/products/:productid/cancel", requiresAuth, requirePermission(PermManageCredits), cancelGroupProductSubscription)
+		groups.GET("/:grouptag/products/:productid/owners/:username", checkGroupProductOwnership)
+		groups.GET("/products/subscriptions/mine", requiresAuth, requirePermission(PermViewGroups), getMyGroupProductSubscriptions)
+
 		groups.GET("/:grouptag/roles", requiresAuth, requirePermission(PermViewGroups), getRoles)
 		groups.POST("/:grouptag/roles", requiresAuth, requirePermission(PermManageGroups), createRole)
 		groups.PATCH("/:grouptag/roles/:roleid", requiresAuth, requirePermission(PermManageGroups), updateRole)

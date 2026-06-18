@@ -377,6 +377,7 @@ type GroupTip struct {
 	GroupTag      string  `json:"group_tag"`
 	FromUserId    UserId  `json:"from_user_id"`
 	AmountCredits float64 `json:"amount_credits"`
+	Note          string  `json:"note"`
 	CreatedAt     int64   `json:"created_at"`
 }
 
@@ -396,6 +397,21 @@ type GroupBenefitProduct struct {
 	PriceCredits   float64 `json:"price_credits"`
 	RoleGrantedId  string  `json:"role_granted_id,omitempty"`
 	BenefitGranted string  `json:"benefit_granted,omitempty"`
+	Subscription   bool    `json:"subscription"`
+	Frequency      int     `json:"frequency,omitempty"`
+	Period         string  `json:"period,omitempty"`
+}
+
+type GroupProductSubscription struct {
+	Id          string `json:"id"`
+	GroupTag    string `json:"group_tag"`
+	ProductId   string `json:"product_id"`
+	UserId      UserId `json:"user_id"`
+	RoleId      string `json:"role_id"`
+	StartedAt   int64  `json:"started_at"`
+	NextBilling int64  `json:"next_billing"`
+	CancelAt    *int64 `json:"cancel_at,omitempty"`
+	Active      bool   `json:"active"`
 }
 
 type GroupInvite struct {
@@ -426,16 +442,17 @@ type GroupBan struct {
 }
 
 type GroupData struct {
-	Group           Group                          `json:"group"`
-	Members         []GroupMember                  `json:"members"`
-	Roles           []GroupRole                    `json:"roles"`
-	Announcements   []GroupAnnouncement            `json:"announcements"`
-	Events          map[string]GroupEvent          `json:"events"`
-	Tips            []GroupTip                     `json:"tips"`
-	BenefitProducts map[string]GroupBenefitProduct `json:"benefit_products"`
-	Invites         []GroupInvite                  `json:"invites"`
-	JoinRequests    []GroupJoinRequest             `json:"join_requests"`
-	Bans            []GroupBan                     `json:"bans"`
+	Group                Group                               `json:"group"`
+	Members              []GroupMember                       `json:"members"`
+	Roles                []GroupRole                         `json:"roles"`
+	Announcements        []GroupAnnouncement                 `json:"announcements"`
+	Events               map[string]GroupEvent               `json:"events"`
+	Tips                 []GroupTip                          `json:"tips"`
+	BenefitProducts      map[string]GroupBenefitProduct      `json:"benefit_products"`
+	ProductSubscriptions map[string]GroupProductSubscription `json:"product_subscriptions"`
+	Invites              []GroupInvite                       `json:"invites"`
+	JoinRequests         []GroupJoinRequest                  `json:"join_requests"`
+	Bans                 []GroupBan                          `json:"bans"`
 }
 
 var userMutexesLock sync.Mutex
