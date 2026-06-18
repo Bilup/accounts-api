@@ -165,6 +165,26 @@ func getGroupRoles(groupTag string) []GroupRole {
 	return data.Roles
 }
 
+func groupJoinRoleIds(roles []GroupRole) []string {
+	roleIds := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, role := range roles {
+		if role.AssignOnJoin && role.Id != "" && !seen[role.Id] {
+			roleIds = append(roleIds, role.Id)
+			seen[role.Id] = true
+		}
+	}
+	if len(roleIds) > 0 {
+		return roleIds
+	}
+	for _, role := range roles {
+		if strings.EqualFold(role.Name, "Member") && role.Id != "" {
+			return []string{role.Id}
+		}
+	}
+	return []string{}
+}
+
 func updateGroupRoles(groupTag string, roles []GroupRole) {
 	groupsDataMutex.Lock()
 	defer groupsDataMutex.Unlock()

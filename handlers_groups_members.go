@@ -187,31 +187,13 @@ func acceptGroupInvite(c *gin.Context) {
 		go saveUsers()
 	}
 
-	memberRoleId := ""
-	for _, role := range data.Roles {
-		if role.AssignOnJoin {
-			memberRoleId = role.Id
-			break
-		}
-	}
-	if memberRoleId == "" {
-		for _, role := range data.Roles {
-			if role.Name == "Member" {
-				memberRoleId = role.Id
-				break
-			}
-		}
-	}
-	if memberRoleId == "" {
-		c.JSON(500, gin.H{"error": "Default member role not found"})
-		return
-	}
+	roleIds := groupJoinRoleIds(data.Roles)
 
 	member := GroupMember{
 		Id:                 uuid.New().String(),
 		GroupTag:           groupTag,
 		UserId:             user.GetId(),
-		RoleIds:            []string{memberRoleId},
+		RoleIds:            roleIds,
 		JoinedAt:           time.Now().Unix(),
 		MutedAnnouncements: false,
 	}
@@ -946,31 +928,13 @@ func acceptGroupJoinRequest(c *gin.Context) {
 		go saveUsers()
 	}
 
-	memberRoleId := ""
-	for _, role := range data.Roles {
-		if role.AssignOnJoin {
-			memberRoleId = role.Id
-			break
-		}
-	}
-	if memberRoleId == "" {
-		for _, role := range data.Roles {
-			if role.Name == "Member" {
-				memberRoleId = role.Id
-				break
-			}
-		}
-	}
-	if memberRoleId == "" {
-		c.JSON(500, gin.H{"error": "Default member role not found"})
-		return
-	}
+	roleIds := groupJoinRoleIds(data.Roles)
 
 	member := GroupMember{
 		Id:                 uuid.New().String(),
 		GroupTag:           groupTag,
 		UserId:             targetUserId,
-		RoleIds:            []string{memberRoleId},
+		RoleIds:            roleIds,
 		JoinedAt:           time.Now().Unix(),
 		MutedAnnouncements: false,
 	}
@@ -1116,14 +1080,11 @@ func transferGroupOwnership(c *gin.Context) {
 	targetIdx := -1
 	ownerIdx := -1
 	ownerRoleId := ""
-	memberRoleId := ""
+	joinRoleIds := groupJoinRoleIds(data.Roles)
 
 	for _, role := range data.Roles {
 		if role.Name == "Owner" {
 			ownerRoleId = role.Id
-		}
-		if role.Name == "Member" && role.AssignOnJoin {
-			memberRoleId = role.Id
 		}
 	}
 
@@ -1152,8 +1113,8 @@ func transferGroupOwnership(c *gin.Context) {
 				newRoleIds = append(newRoleIds, rid)
 			}
 		}
-		if len(newRoleIds) == 0 && memberRoleId != "" {
-			newRoleIds = append(newRoleIds, memberRoleId)
+		if len(newRoleIds) == 0 {
+			newRoleIds = append(newRoleIds, joinRoleIds...)
 		}
 		data.Members[ownerIdx].RoleIds = newRoleIds
 	}

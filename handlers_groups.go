@@ -360,25 +360,14 @@ func joinGroup(c *gin.Context) {
 		go saveUsers()
 	}
 
-	memberId := ""
 	roles := getGroupRoles(groupTag)
-	for _, role := range roles {
-		if role.Name == "Member" {
-			memberId = role.Id
-			break
-		}
-	}
-
-	if memberId == "" {
-		c.JSON(500, gin.H{"error": "Default member role not found"})
-		return
-	}
+	roleIds := groupJoinRoleIds(roles)
 
 	member := GroupMember{
 		Id:                 uuid.New().String(),
 		GroupTag:           groupTag,
 		UserId:             user.GetId(),
-		RoleIds:            []string{memberId},
+		RoleIds:            roleIds,
 		JoinedAt:           time.Now().Unix(),
 		MutedAnnouncements: false,
 	}
