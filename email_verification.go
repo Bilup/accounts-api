@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/mail"
 	"net/smtp"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,13 +17,13 @@ import (
 func generateVerifyToken() string {
 	b := make([]byte, 32)
 	rand.Read(b)
-	return "ev_" + base64.URLEncoding.EncodeToString(b)
+	return "ev_" + base64.RawURLEncoding.EncodeToString(b)
 }
 
 func generateResetToken() string {
 	b := make([]byte, 32)
 	rand.Read(b)
-	return "pr_" + base64.URLEncoding.EncodeToString(b)
+	return "pr_" + base64.RawURLEncoding.EncodeToString(b)
 }
 
 func isValidEmail(email string) bool {
@@ -79,7 +80,7 @@ func sendResetEmail(toEmail string, username Username, token string) {
 		log.Printf("[email] SMTP not configured, skipping reset email for %s", toEmail)
 		return
 	}
-	resetURL := fmt.Sprintf("%s/reset_password?token=%s", "https://rotur.dev", token)
+	resetURL := fmt.Sprintf("%s/reset_password?token=%s", "https://rotur.dev", url.QueryEscape(token))
 	subject := "Reset your Rotur password"
 	body := fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=\"utf-8\"\r\n\r\n"+
@@ -191,14 +192,15 @@ func requestPasswordResetHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Invalid request body"})
 		return
 	}
-	if req.Email == "" || !isValidEmail(req.Email) {
+	email := strings.TrimSpace(req.Email)
+	if email == "" || !isValidEmail(email) {
 		c.JSON(400, gin.H{"error": "A valid email address is required"})
 		return
 	}
 	var foundUser *User
 	usersMutex.RLock()
 	for i := range users {
-		if strings.EqualFold(users[i].GetString("email"), req.Email) {
+		if strings.EqualFold(strings.TrimSpace(users[i].GetEmail()), email) {
 			foundUser = &users[i]
 			break
 		}
@@ -219,7 +221,7 @@ func requestPasswordResetHandler(c *gin.Context) {
 	foundUser.Set("sys.reset_sent", now)
 	foundUser.Set("sys.reset_expires", now+3_600_000)
 	go saveUsers()
-	go sendResetEmail(foundUser.GetString("email"), foundUser.GetUsername(), token)
+	go sendResetEmail(foundUser.GetEmail(), foundUser.GetUsername(), token)
 	c.JSON(200, gin.H{"message": "If an account with that email exists, a reset link has been sent"})
 }
 
@@ -232,7 +234,8 @@ func resetPasswordHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Invalid request body"})
 		return
 	}
-	if req.Token == "" || req.NewPassword == "" {
+	token := strings.TrimSpace(req.Token)
+	if token == "" || req.NewPassword == "" {
 		c.JSON(400, gin.H{"error": "Token and new password are required"})
 		return
 	}
@@ -243,7 +246,7 @@ func resetPasswordHandler(c *gin.Context) {
 	usersMutex.RLock()
 	var foundUser *User
 	for i := range users {
-		if users[i].GetString("sys.reset_token") == req.Token {
+		if users[i].GetString("sys.reset_token") == token {
 			foundUser = &users[i]
 			break
 		}
@@ -263,6 +266,7 @@ func resetPasswordHandler(c *gin.Context) {
 	}
 	SetPasswordV1(*foundUser, req.NewPassword)
 	foundUser.Set("sys.reset_token", "")
+	foundUser.Set("sys.reset_sent", 0)
 	foundUser.Set("sys.reset_expires", 0)
 	go saveUsers()
 	c.JSON(200, gin.H{"message": "Password reset successfully"})
