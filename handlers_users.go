@@ -1458,11 +1458,25 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 	go saveUsers()
 
 	go func(target UserId, username Username) {
-		// Update posts
 		postsMutex.Lock()
 		for i := range posts {
 			if posts[i].User == target {
 				posts[i].User = "Deleted User"
+			}
+			for j := range posts[i].Replies {
+				if posts[i].Replies[j].User == target {
+					posts[i].Replies[j].User = "Deleted User"
+				}
+			}
+			if posts[i].OriginalPost != nil {
+				if posts[i].OriginalPost.User == target {
+					posts[i].OriginalPost.User = "Deleted User"
+				}
+				for j := range posts[i].OriginalPost.Replies {
+					if posts[i].OriginalPost.Replies[j].User == target {
+						posts[i].OriginalPost.Replies[j].User = "Deleted User"
+					}
+				}
 			}
 		}
 		postsMutex.Unlock()
