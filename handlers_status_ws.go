@@ -435,17 +435,6 @@ func OnUserUpdate(uid UserId, key string, value any) {
 	hub.pushKeyUpdate(uid, key, value)
 }
 
-func (h *Hub) sendToUser(userId UserId, data []byte) {
-	h.Lock()
-	defer h.Unlock()
-	for _, c := range h.userConns[userId] {
-		select {
-		case c.send <- data:
-		default:
-		}
-	}
-}
-
 func (h *Hub) sweep() {
 	h.Lock()
 	for name, r := range h.rooms {

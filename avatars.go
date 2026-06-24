@@ -461,20 +461,6 @@ func sendEmpty(c *gin.Context) {
 	c.Data(http.StatusOK, "image/png", buf.Bytes())
 }
 
-// decodeGIFFrame decodes a single composited frame from a GIF at the given index.
-func decodeGIFFrame(g *gif.GIF, frameIdx int) image.Image {
-	if frameIdx >= len(g.Image) {
-		return nil
-	}
-	bounds := image.Rect(0, 0, g.Config.Width, g.Config.Height)
-	dst := image.NewRGBA(bounds)
-	for i := 0; i <= frameIdx; i++ {
-		frame := g.Image[i]
-		draw.Draw(dst, frame.Bounds(), frame, frame.Bounds().Min, draw.Over)
-	}
-	return dst
-}
-
 // savePfp decodes the data-URI image and writes the resized profile picture
 // directly to disk. No HTTP round-trip is performed.
 func savePfp(dataURI string, user *User) error {

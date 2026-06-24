@@ -159,12 +159,18 @@ func renderBioRegex(bio string, profile User, otherKeys profileResp) string {
 func getProfile(c *gin.Context) {
 	nameRaw := Username(c.Query("username"))
 	if nameRaw == "" {
+		nameRaw = Username(c.Param("username"))
+	}
+	if nameRaw == "" {
 		nameRaw = Username(c.Query("name"))
 	}
 
 	discord_id := c.Query("discord_id")
 
 	id := UserId(c.Query("id"))
+	if id == "" {
+		id = UserId(c.Param("id"))
+	}
 	if nameRaw == "" && discord_id == "" && id == "" {
 		c.JSON(400, gin.H{"error": "Name, Discord ID, or ID is required"})
 		return
@@ -181,7 +187,12 @@ func getProfile(c *gin.Context) {
 		nameRaw = foundUser.GetUsername()
 	}
 
-	authKey := c.Query("auth")
+	authKey := extractAuthKey(c)
+	if authKey == "" {
+		if bodyUser := tryBodyLogin(c); bodyUser != nil {
+			authKey = bodyUser.GetKey()
+		}
+	}
 	includePosts := c.DefaultQuery("include_posts", "1") == "1"
 
 	// Convert the name to lowercase for case-insensitive comparison

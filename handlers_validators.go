@@ -66,7 +66,7 @@ func StartValidatorCleanup() {
 }
 
 func generateValidator(c *gin.Context) {
-	authKey := c.Query("auth")
+	authKey := extractAuthKey(c)
 	user := c.MustGet("user").(*User)
 	key := c.Query("key")
 	if key == "" {
@@ -74,9 +74,7 @@ func generateValidator(c *gin.Context) {
 		return
 	}
 
-	token_type := c.MustGet("token_type")
-	if token_type == "sub" {
-		user := subTokenIndex[authKey].UserId.User()
+	if c.GetString("token_type") == "sub" {
 		authKey = user.GetKey()
 	}
 

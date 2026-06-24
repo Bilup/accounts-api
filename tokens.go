@@ -281,37 +281,6 @@ func generateSubTokenValue() string {
 	return "rotur_st_" + base64.URLEncoding.EncodeToString(b)
 }
 
-func authenticateWithSubToken(tokenValue string) (*User, *SubToken, error) {
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-
-	for i := range users {
-		userId := users[i].GetId()
-		store, err := loadTokenStore(userId)
-		if err != nil {
-			continue
-		}
-
-		for j := range store.Tokens {
-			t := &store.Tokens[j]
-			if t.Token == tokenValue {
-				if t.Revoked {
-					return nil, nil, fmt.Errorf("token has been revoked")
-				}
-				if t.ExpiresAt != nil && *t.ExpiresAt < time.Now().UnixMilli() {
-					return nil, nil, fmt.Errorf("token has expired")
-				}
-				now := time.Now().UnixMilli()
-				t.LastUsedAt = &now
-				go saveTokenStore(userId, store)
-				return &users[i], t, nil
-			}
-		}
-	}
-
-	return nil, nil, fmt.Errorf("sub-token not found")
-}
-
 func (t *SubToken) hasPermission(perm TokenPermission) bool {
 	for _, p := range t.Permissions {
 		if p == perm {

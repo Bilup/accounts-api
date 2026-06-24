@@ -259,29 +259,9 @@ func applyRateLimit(key string, limitType string) (bool, int, float64) {
 	isAllowed := rateLimit.Count <= limits.Count
 	remaining := max(limits.Count-rateLimit.Count, 0)
 
-	// If rate limit exceeded, add 10 seconds penalty
-	// Fuck scrapers and bots ngl
-	if !isAllowed {
-		rateLimit.ResetAt += 10
-	}
-
 	resetTime := float64(rateLimit.ResetAt)
 
 	return isAllowed, remaining, resetTime
-}
-
-func getRateLimitKey(c *gin.Context) string {
-	authKey := c.Query("auth")
-	if authKey != "" {
-		return authKey
-	}
-
-	clientIP := c.ClientIP()
-	if clientIP != "" {
-		return clientIP
-	}
-
-	return "unknown_client"
 }
 
 func cleanRateLimitStorage() {
@@ -318,14 +298,21 @@ func getUserByIdx(idx int) (*User, error) {
 
 func rateLimit(limitType string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		effectiveLimitType := limitType
+		if isRequestAuthenticated(c) {
+			if _, ok := rateLimits["auth_"+limitType]; ok {
+				effectiveLimitType = "auth_" + limitType
+			}
+		}
+
 		rateLimitKey := getRateLimitKey(c)
-		isAllowed, remaining, resetTime := applyRateLimit(rateLimitKey, limitType)
+		isAllowed, remaining, resetTime := applyRateLimit(rateLimitKey, effectiveLimitType)
 
 		if !isAllowed {
-			c.Header("X-RateLimit-Limit", strconv.Itoa(rateLimits[limitType].Count))
+			c.Header("X-RateLimit-Limit", strconv.Itoa(rateLimits[effectiveLimitType].Count))
 			c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
 			c.Header("X-RateLimit-Reset", strconv.FormatFloat(resetTime, 'f', 0, 64))
-			c.JSON(429, gin.H{"error": "Rate limit exceeded. Rate limit extended by 10 seconds due to violation.", "reset_time": resetTime, "remaining": remaining})
+			c.JSON(429, gin.H{"error": "Rate limit exceeded.", "reset_time": resetTime, "remaining": remaining})
 			c.Abort()
 			return
 		}
@@ -334,16 +321,85 @@ func rateLimit(limitType string) gin.HandlerFunc {
 	}
 }
 
-func requiresAuth(c *gin.Context) {
+func extractAuthKey(c *gin.Context) string {
 	authKey := c.Query("auth")
-	if authKey == "" {
-		authHeader := c.GetHeader("Authorization")
-		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-			authKey = authHeader[7:]
-		} else if authHeader != "" {
-			authKey = authHeader
-		}
+	if authKey != "" {
+		return authKey
 	}
+	authHeader := c.GetHeader("Authorization")
+	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+		return authHeader[len("bearer "):]
+	}
+	if authHeader != "" {
+		return authHeader
+	}
+	return ""
+}
+
+func isRequestAuthenticated(c *gin.Context) bool {
+	authKey := extractAuthKey(c)
+	if authKey == "" {
+		return false
+	}
+	if authenticateWithKey(authKey) != nil {
+		return true
+	}
+	subTokenIndexMutex.RLock()
+	_, ok := subTokenIndex[authKey]
+	subTokenIndexMutex.RUnlock()
+	return ok
+}
+
+func tryBodyLogin(c *gin.Context) *User {
+	if c.Request.ContentLength == 0 {
+		return nil
+	}
+	var creds struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&creds); err != nil {
+		return nil
+	}
+	if creds.Username == "" || creds.Password == "" {
+		return nil
+	}
+	user, err := findAccountByLogin(creds.Username, creds.Password)
+	if err != nil || len(user) == 0 {
+		return nil
+	}
+	return &user
+}
+
+func resolveOptionalUser(c *gin.Context) *User {
+	if key := extractAuthKey(c); key != "" {
+		if u := authenticateWithKey(key); u != nil {
+			return u
+		}
+		if subUser, _, err := authenticateWithSubTokenFast(key); err == nil && subUser != nil {
+			return subUser
+		}
+		return nil
+	}
+	return tryBodyLogin(c)
+}
+
+func getRateLimitKey(c *gin.Context) string {
+	authKey := extractAuthKey(c)
+	if authKey != "" {
+		return authKey
+	}
+
+	clientIP := c.ClientIP()
+	if clientIP != "" {
+		return clientIP
+	}
+
+	return "unknown_client"
+}
+
+func requiresAuth(c *gin.Context) {
+	authKey := extractAuthKey(c)
 	if authKey == "" {
 		c.JSON(403, gin.H{"error": "auth key is required"})
 		c.Abort()
@@ -515,22 +571,6 @@ func copyAndReplace(src, dst, old, new string) error {
 	updated := strings.ReplaceAll(string(data), old, new)
 
 	return os.WriteFile(dst, []byte(updated), 0644)
-}
-
-func removeUserPath(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // already gone, not an error
-		}
-		return err
-	}
-
-	if info.IsDir() {
-		return os.RemoveAll(path)
-	}
-
-	return os.Remove(path)
 }
 
 func sendWebhook(url string, data map[string]any) error {
@@ -706,18 +746,6 @@ func getGiftByCode(code string) (*Gift, bool) {
 
 	for i := range gifts {
 		if gifts[i].Code == code {
-			return &gifts[i], true
-		}
-	}
-	return nil, false
-}
-
-func getGiftById(id string) (*Gift, bool) {
-	giftsMutex.RLock()
-	defer giftsMutex.RUnlock()
-
-	for i := range gifts {
-		if gifts[i].Id == id {
 			return &gifts[i], true
 		}
 	}

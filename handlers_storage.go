@@ -209,10 +209,6 @@ var (
 	saveScheduled  int32
 )
 
-func MarkUsersDirty() {
-	atomic.StoreInt32(&usersDirty, 1)
-}
-
 func saveUsers() {
 	atomic.StoreInt32(&usersDirty, 1)
 
@@ -257,28 +253,6 @@ func saveUsers() {
 			}
 		}
 	}()
-}
-
-func saveUsersSync() {
-	usersSaveMutex.Lock()
-	defer usersSaveMutex.Unlock()
-
-	usersMutex.RLock()
-	snapshot := make([]User, len(users))
-	for i := range users {
-		snapshot[i] = copyUser(users[i])
-	}
-	usersMutex.RUnlock()
-
-	data, err := json.Marshal(snapshot)
-	if err != nil {
-		log.Printf("Error marshaling users: %v", err)
-		return
-	}
-
-	if err := atomicWrite(USERS_FILE_PATH, data, 0644); err != nil {
-		log.Printf("Error saving users (atomic write failed): %v", err)
-	}
 }
 
 func copyUser(u User) User {

@@ -53,7 +53,15 @@ var (
 		"search":   {Count: 20, Period: 60},
 		"ai":       {Count: 5, Period: 10},
 		"register": {Count: 5, Period: 10},
-		"global":   {Count: 10, Period: 10}, // Global rate limit: 10 requests per 10 seconds
+		"global":   {Count: 10, Period: 10},
+
+		"auth_default": {Count: 300, Period: 60},
+		"auth_post":    {Count: 20, Period: 60},
+		"auth_reply":   {Count: 40, Period: 60},
+		"auth_follow":  {Count: 60, Period: 60},
+		"auth_profile": {Count: 120, Period: 60},
+		"auth_search":  {Count: 60, Period: 60},
+		"auth_ai":      {Count: 15, Period: 10},
 	}
 )
 

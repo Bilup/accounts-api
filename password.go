@@ -104,31 +104,6 @@ func setUserSalt(user User, salt string) {
 	}
 }
 
-func getUserSalt(user User) (string, bool) {
-	if salt := getStringOrEmpty(user.Get("sys.salt")); salt != "" {
-		return salt, true
-	}
-
-	userId := user.GetId()
-
-	userSaltCacheMu.RLock()
-	cached, ok := userSaltCache[userId]
-	userSaltCacheMu.RUnlock()
-	if ok && cached != "" {
-		return cached, true
-	}
-
-	loaded, err := LoadUserJSON[string](userId, "salt.json")
-	if err == nil && loaded != "" {
-		userSaltCacheMu.Lock()
-		userSaltCache[userId] = loaded
-		userSaltCacheMu.Unlock()
-		return loaded, true
-	}
-
-	return "", false
-}
-
 func VerifyPassword(user User, rawPassword string) (bool, bool) {
 	switch user.GetPassVersion() {
 	case 0:

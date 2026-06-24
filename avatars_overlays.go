@@ -30,10 +30,3 @@ func loadOverlays() {
 		return
 	}
 }
-
-func userHasOverlayTier(user User, requires string) bool {
-	if requires == "" {
-		return true
-	}
-	return hasTierOrHigher(user.GetSubscription().Tier, requires)
-}

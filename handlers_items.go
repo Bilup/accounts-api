@@ -358,11 +358,7 @@ func getItem(c *gin.Context) {
 
 	itemToReturn := *targetItem
 
-	authKey := c.Query("auth")
-	var user *User
-	if authKey != "" {
-		user = authenticateWithKey(authKey)
-	}
+	user := resolveOptionalUser(c)
 
 	// Hide private data unless user is the owner
 	if user == nil || user.GetId() != targetItem.Owner {

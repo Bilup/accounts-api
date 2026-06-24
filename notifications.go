@@ -7,7 +7,6 @@ import (
 	"log"
 	"maps"
 	"net/http"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -175,42 +174,6 @@ func notify(eventType string, data any) bool {
 		log.Printf("[Event] Event %s sent to Event server successfully", eventType)
 	}
 	return success
-}
-
-// patchUserUpdate makes a PATCH request to /users endpoint for user updates
-func patchUserUpdate(username Username, key string, value any) bool {
-	// Find the user's auth key
-	usersMutex.RLock()
-	var authKey string
-	for _, user := range users {
-		if user.GetUsername().ToLower() == username {
-			authKey = user.GetKey()
-			break
-		}
-	}
-	usersMutex.RUnlock()
-
-	if authKey == "" {
-		log.Printf("[PatchUpdate] User %s not found or has no auth key", username)
-		return false
-	}
-
-	payload := map[string]any{
-		"auth":  authKey,
-		"key":   key,
-		"value": value,
-	}
-
-	envOnce.Do(loadEnvFile)
-	ADMIN_TOKEN := os.Getenv("ADMIN_TOKEN")
-
-	// Avatar/banner uploads may take several seconds; allow up to 15s
-	success := makeHTTPRequest("PATCH", "http://localhost:5602/users?token="+ADMIN_TOKEN, payload, 15*time.Second, "PatchUpdate", 200)
-	if success {
-		log.Printf("[PatchUpdate] User %s key %s updated successfully via PATCH", username, key)
-		return broadcastUserUpdate(username, key, value)
-	}
-	return false
 }
 
 func broadcastUserUpdate(username Username, key string, value any) bool {

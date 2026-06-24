@@ -566,57 +566,6 @@ func (c *Conn) handleRoomState(msg map[string]json.RawMessage) {
 	})
 }
 
-func (c *Conn) roomList() []string {
-	rooms := make([]string, 0, len(c.rooms))
-	for name := range c.rooms {
-		rooms = append(rooms, name)
-	}
-	return rooms
-}
-
-func activityFromMap(id string, m map[string]any) Activity {
-	act := Activity{ID: id}
-	if v, ok := m["title"].(string); ok {
-		act.Title = v
-	}
-	if v, ok := m["image"].(string); ok {
-		act.Image = v
-	}
-	if v, ok := m["url"].(string); ok {
-		act.URL = v
-	}
-	if app, ok := m["application"].(map[string]any); ok {
-		a := &ActivityApplication{}
-		if v, ok := app["name"].(string); ok {
-			a.Name = v
-		}
-		if v, ok := app["url"].(string); ok {
-			a.URL = v
-		}
-		act.Application = a
-	}
-	if media, ok := m["media"].(map[string]any); ok {
-		md := &ActivityMedia{}
-		if v, ok := media["title"].(string); ok {
-			md.Title = v
-		}
-		if v, ok := media["artist"].(string); ok {
-			md.Artist = v
-		}
-		if v, ok := media["album"].(string); ok {
-			md.Album = v
-		}
-		if v, ok := media["start"].(float64); ok {
-			md.Start = int64(v)
-		}
-		if v, ok := media["end"].(float64); ok {
-			md.End = int64(v)
-		}
-		act.Media = md
-	}
-	return act
-}
-
 func statusGetHTTP(c *gin.Context) {
 	name := c.Query("name")
 	if name == "" {

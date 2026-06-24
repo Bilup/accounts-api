@@ -41,6 +41,7 @@ func main() {
 	go cleanExpiredGifts()
 	go cleanExpiredSubTokens()
 	go startStandingRecoveryChecker()
+	StartValidatorCleanup()
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
@@ -56,8 +57,15 @@ func main() {
 	r.GET("/followers", rateLimit("profile"), getFollowers)
 	r.GET("/following", rateLimit("profile"), getFollowing)
 	r.GET("/notifications", rateLimit("default"), requiresAuth, requirePermission(PermViewNotifications), getNotifications)
-	r.GET("/profile", rateLimit("profile"), getProfile)
 	r.GET("/exists", rateLimit("profile"), getExists)
+	profile := r.Group("/profile")
+	{
+		profile.GET("", rateLimit("profile"), getProfile)
+		profile.GET("/:username", rateLimit("profile"), getProfile)
+		profile.GET("/:username/cosmetics", rateLimit("profile"), getProfileCosmetics)
+		profile.GET("/cosmetics", rateLimit("default"), getProfileCosmeticsBatch)
+		profile.POST("/cosmetics", rateLimit("default"), getProfileCosmeticsBatch)
+	}
 	r.GET("/feed", rateLimit("default"), getFeed)
 	r.GET("/following_feed", rateLimit("default"), requiresAuth, requirePermission(PermViewPosts), getFollowingFeed)
 	r.GET("/delete", requiresAuth, requirePermission(PermDeletePost), deletePost)

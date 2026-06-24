@@ -106,22 +106,6 @@ type Group struct {
 	CreditsBalance float64    `json:"credits_balance"`
 }
 
-func getGroupById(id GroupId) (*Group, bool) {
-	if id == "" {
-		return &Group{}, false
-	}
-
-	groupsDataMutex.RLock()
-	defer groupsDataMutex.RUnlock()
-
-	for _, data := range groupsData {
-		if data.Group.Id == id {
-			return &data.Group, true
-		}
-	}
-	return &Group{}, false
-}
-
 func getGroupDataByTag(tag string) (*GroupData, bool) {
 	groupsDataMutex.RLock()
 	data, ok := groupsData[tag]
@@ -268,18 +252,6 @@ func getGroupRolesMap(groupTag string) map[string]GroupRole {
 		rolesMap[role.Id] = role
 	}
 	return rolesMap
-}
-
-func updateGroupRolesMap(groupTag string, rolesMap map[string]GroupRole) {
-	groupsDataMutex.Lock()
-	defer groupsDataMutex.Unlock()
-
-	data := groupsData[groupTag]
-	data.Roles = make([]GroupRole, 0)
-	for _, role := range rolesMap {
-		data.Roles = append(data.Roles, role)
-	}
-	go saveGroupData(groupTag)
 }
 
 type GroupPublic = GroupNet

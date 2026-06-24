@@ -204,7 +204,7 @@ func getUserBy(c *gin.Context) {
 }
 
 func getUser(c *gin.Context) {
-	authKey := c.Query("auth")
+	authKey := extractAuthKey(c)
 
 	var foundUser User
 
@@ -224,6 +224,10 @@ func getUser(c *gin.Context) {
 				foundUser = *subUser
 				subToken = st
 			}
+		}
+	} else {
+		if bodyUser := tryBodyLogin(c); bodyUser != nil {
+			foundUser = *bodyUser
 		}
 	}
 
@@ -404,37 +408,22 @@ func userToProfileOnly(user User, subTokenValue string) map[string]any {
 }
 
 func checkAuth(c *gin.Context) {
-	auth := c.Query("auth")
-	if auth == "" {
-		c.JSON(400, gin.H{"error": "auth is required"})
-		return
-	}
+	user := c.MustGet("user").(*User)
+	tokenType := c.GetString("token_type")
 
-	idToUserMutex.RLock()
-	idx, ok := keyToUserIdx[auth]
-	idToUserMutex.RUnlock()
-	if ok {
-		usersMutex.RLock()
-		user := users[idx]
-		usersMutex.RUnlock()
-		if user.GetKey() == auth {
-			c.JSON(200, gin.H{"auth": true, "username": user.GetUsername(), "token_type": "main"})
-			return
+	resp := gin.H{
+		"auth":       true,
+		"username":   user.GetUsername(),
+		"token_type": tokenType,
+	}
+	if tokenType == "sub" {
+		if st, ok := c.Get("sub_token"); ok {
+			if subToken, ok := st.(*SubToken); ok {
+				resp["permissions"] = subToken.Permissions
+			}
 		}
 	}
-
-	subUser, subToken, err := authenticateWithSubTokenFast(auth)
-	if err == nil && subUser != nil {
-		c.JSON(200, gin.H{
-			"auth":        true,
-			"username":    subUser.GetUsername(),
-			"token_type":  "sub",
-			"permissions": subToken.Permissions,
-		})
-		return
-	}
-
-	c.JSON(200, gin.H{"auth": false, "username": ""})
+	c.JSON(200, resp)
 }
 
 func addLogin(c *gin.Context, user User, message string) {

@@ -1047,13 +1047,6 @@ func (fs *FileSystem) setFileByUUIDUnsafe(username Username, uuid string, file F
 	return nil
 }
 
-// SetFileByUUID is the public version that acquires the lock
-func (fs *FileSystem) SetFileByUUID(username Username, uuid string, file FileEntry) error {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	return fs.setFileByUUIDUnsafe(username, uuid, file)
-}
-
 func (fs *FileSystem) calculateTotalSize(username Username) (int, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()

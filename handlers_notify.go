@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/ecdsa"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -96,16 +95,6 @@ func loadOrGenerateVAPIDKeys() {
 	} else {
 		log.Println("[VAPID] Generated and saved new keys to", keyPath)
 	}
-}
-
-func marshalVAPIDKey(key *ecdsa.PrivateKey) (pubB64 string, privB64 string, err error) {
-	ecdhKey, convErr := key.ECDH()
-	if convErr != nil {
-		return "", "", convErr
-	}
-	pubB64 = base64.RawURLEncoding.EncodeToString(ecdhKey.PublicKey().Bytes())
-	privB64 = base64.RawURLEncoding.EncodeToString(key.D.Bytes())
-	return pubB64, privB64, nil
 }
 
 func ensureVAPIDKeys() {

@@ -120,25 +120,6 @@ func (c *avatarLRUCache) evictOldest() {
 	c.removeEntry(c.tail)
 }
 
-func (c *avatarLRUCache) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.items = make(map[string]*avatarCacheEntry)
-	c.head = nil
-	c.tail = nil
-	c.curBytes = 0
-}
-
-func (c *avatarLRUCache) Invalidate(key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if e, ok := c.items[key]; ok {
-		c.curBytes -= e.size
-		c.removeEntry(e)
-		delete(c.items, key)
-	}
-}
-
 // --- Buffer pool ---
 
 var avatarBufPool = sync.Pool{
@@ -204,33 +185,6 @@ func circleMask(w, h, radius int) *image.Alpha {
 	return mask
 }
 
-func applyCircleMask(imgData []byte, radius int) ([]byte, string, error) {
-	img, _, err := image.Decode(bytes.NewReader(imgData))
-	if err != nil {
-		return imgData, "image/jpeg", err
-	}
-	bounds := img.Bounds()
-	w := bounds.Dx()
-	h := bounds.Dy()
-
-	if radius <= 0 || radius > w/2 || radius > h/2 {
-		radius = min(w, h) / 2
-	}
-
-	result := image.NewRGBA(bounds)
-	draw.Draw(result, bounds, img, bounds.Min, draw.Src)
-	mask := circleMask(w, h, radius)
-	draw.DrawMask(result, bounds, result, bounds.Min, mask, image.Point{}, draw.Over)
-
-	buf := avatarBufPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	defer avatarBufPool.Put(buf)
-	if err := png.Encode(buf, result); err != nil {
-		return imgData, "image/jpeg", err
-	}
-	return buf.Bytes(), "image/png", nil
-}
-
 func roundCorners(imgData []byte, radius int) ([]byte, string, error) {
 	img, _, err := image.Decode(bytes.NewReader(imgData))
 	if err != nil {
@@ -255,26 +209,6 @@ func roundCorners(imgData []byte, radius int) ([]byte, string, error) {
 		return imgData, "image/jpeg", err
 	}
 	return buf.Bytes(), "image/png", nil
-}
-
-// isPixelInRoundedRect reports whether a pixel is inside a rounded rectangle.
-func isPixelInRoundedRect(x, y, width, height, radius int) bool {
-	switch {
-	case x < radius && y < radius:
-		dx, dy := x-radius, y-radius
-		return dx*dx+dy*dy <= radius*radius
-	case x >= width-radius && y < radius:
-		dx, dy := x-(width-radius-1), y-radius
-		return dx*dx+dy*dy <= radius*radius
-	case x < radius && y >= height-radius:
-		dx, dy := x-radius, y-(height-radius-1)
-		return dx*dx+dy*dy <= radius*radius
-	case x >= width-radius && y >= height-radius:
-		dx, dy := x-(width-radius-1), y-(height-radius-1)
-		return dx*dx+dy*dy <= radius*radius
-	default:
-		return true
-	}
 }
 
 func applyMaskToPaletted(paletted *image.Paletted, mask *image.Alpha, w, h int) error {
@@ -409,104 +343,6 @@ func roundGIF(src *gif.GIF, radius int) (*gif.GIF, error) {
 	return dst, nil
 }
 
-// circleMaskGIF applies a circular mask to all frames of a GIF.
-func circleMaskGIF(src *gif.GIF, radius int) (*gif.GIF, error) {
-	if len(src.Image) == 0 {
-		return nil, fmt.Errorf("no frames in GIF")
-	}
-	bounds := image.Rect(0, 0, src.Config.Width, src.Config.Height)
-	w, h := bounds.Dx(), bounds.Dy()
-	if radius <= 0 || radius > w/2 || radius > h/2 {
-		radius = min(w, h) / 2
-	}
-
-	mask := circleMask(w, h, radius)
-
-	dst := &gif.GIF{
-		LoopCount: src.LoopCount,
-		Delay:     src.Delay,
-		Disposal:  make([]byte, len(src.Disposal)),
-		Image:     make([]*image.Paletted, len(src.Image)),
-		Config:    src.Config,
-	}
-
-	var bgColor color.Color
-	if src.BackgroundIndex < byte(len(src.Image[0].Palette)) {
-		bgColor = src.Image[0].Palette[src.BackgroundIndex]
-	} else {
-		bgColor = color.Transparent
-	}
-
-	compositor := image.NewRGBA(bounds)
-	draw.Draw(compositor, bounds, &image.Uniform{bgColor}, image.Point{}, draw.Src)
-
-	var prev *image.RGBA
-	frameRect := bounds
-
-	ditherer := colorquant.Dither{
-		Filter: [][]float32{
-			{0.0, 0.0, 7.0 / 16.0},
-			{3.0 / 16.0, 5.0 / 16.0, 1.0 / 16.0},
-		},
-	}
-
-	for i := range src.Image {
-		frame := src.Image[i]
-		frameRect = frame.Bounds()
-
-		if src.Disposal[i] == gif.DisposalPrevious {
-			prev = image.NewRGBA(bounds)
-			draw.Draw(prev, bounds, compositor, image.Point{}, draw.Src)
-		}
-
-		draw.Draw(compositor, frameRect, frame, frameRect.Min, draw.Over)
-
-		inputRGBA := image.NewRGBA(bounds)
-		draw.Draw(inputRGBA, bounds, compositor, image.Point{}, draw.Src)
-
-		paletted := image.NewPaletted(bounds, palette.WebSafe)
-		numColors, withinLimit := countAndBuildPalette(inputRGBA, 255, paletted)
-		var outputRGBA *image.RGBA
-
-		if !withinLimit || numColors > 256 {
-			outputRGBA = toRGBA(ditherer.Quantize(inputRGBA, paletted, 255, true, false))
-		} else {
-			outputRGBA = toRGBA(paletted)
-		}
-
-		// Apply circle mask
-		maskPix := mask.Pix
-		outPix := outputRGBA.Pix
-		outStride := outputRGBA.Stride
-		for y := 0; y < h; y++ {
-			maskRow := y * mask.Stride
-			outRow := y * outStride
-			for x := 0; x < w; x++ {
-				if maskPix[maskRow+x] == 0 {
-					outPix[outRow+x*4+3] = 0
-				}
-			}
-		}
-
-		if err := applyMaskToPaletted(paletted, mask, w, h); err != nil {
-			return nil, err
-		}
-
-		dst.Image[i] = paletted
-		dst.Disposal[i] = gif.DisposalNone
-
-		switch src.Disposal[i] {
-		case gif.DisposalBackground:
-			draw.Draw(compositor, frameRect, &image.Uniform{bgColor}, image.Point{}, draw.Src)
-		case gif.DisposalPrevious:
-			if prev != nil {
-				draw.Draw(compositor, bounds, prev, image.Point{}, draw.Src)
-			}
-		}
-	}
-	return dst, nil
-}
-
 func countAndBuildPalette(img *image.RGBA, limit int, paletted *image.Paletted) (int, bool) {
 	bounds := img.Bounds()
 	w := bounds.Dx()
@@ -546,23 +382,6 @@ func toRGBA(src image.Image) *image.RGBA {
 	rgba := image.NewRGBA(bounds)
 	draw.Draw(rgba, bounds, src, bounds.Min, draw.Src)
 	return rgba
-}
-
-func uniqueColors(img image.Image, limit int) (int, bool) {
-	seen := make(map[color.Color]struct{})
-	bounds := img.Bounds()
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			c := img.At(x, y)
-			if _, ok := seen[c]; !ok {
-				seen[c] = struct{}{}
-				if len(seen) > limit {
-					return len(seen), false
-				}
-			}
-		}
-	}
-	return len(seen), true
 }
 
 func resizeGIF(data []byte, width, height int) ([]byte, error) {
