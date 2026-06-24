@@ -61,8 +61,7 @@ func updateSystem(c *gin.Context) {
 		Key    string `json:"key"`
 		Value  any    `json:"value"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 

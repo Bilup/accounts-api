@@ -44,6 +44,14 @@ func getStatus(c *gin.Context) {
 	c.JSON(200, statusData)
 }
 
+func bindJSON(c *gin.Context, dst any) bool {
+	if err := c.ShouldBindJSON(dst); err != nil {
+		c.JSON(400, gin.H{"error": "Invalid request body"})
+		return false
+	}
+	return true
+}
+
 func getStringSlice(u User, key string) []string {
 	mu := getMutexForUser(u)
 	mu.Lock()
@@ -64,4 +72,3 @@ func getStringSlice(u User, key string) []string {
 	}
 	return []string{}
 }
-

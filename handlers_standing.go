@@ -18,8 +18,7 @@ func setStandingAdmin(c *gin.Context) {
 	}
 
 	var req Request
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -73,8 +72,7 @@ func getStandingHistoryAdmin(c *gin.Context) {
 	}
 
 	var req Request
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -117,8 +115,7 @@ func recoverStandingAdmin(c *gin.Context) {
 	}
 
 	var req Request
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 

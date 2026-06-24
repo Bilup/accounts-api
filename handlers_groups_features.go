@@ -298,8 +298,7 @@ func updateEvent(c *gin.Context) {
 	}
 
 	var updateData map[string]any
-	if err := c.ShouldBindJSON(&updateData); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &updateData) {
 		return
 	}
 
@@ -1312,8 +1311,7 @@ func updateRole(c *gin.Context) {
 	}
 
 	var updateData map[string]any
-	if err := c.ShouldBindJSON(&updateData); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &updateData) {
 		return
 	}
 

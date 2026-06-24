@@ -162,8 +162,7 @@ func changePasswordHandler(c *gin.Context) {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 	if req.CurrentPassword == "" || req.NewPassword == "" {
@@ -188,8 +187,7 @@ func requestPasswordResetHandler(c *gin.Context) {
 	var req struct {
 		Email string `json:"email"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 	email := strings.TrimSpace(req.Email)
@@ -230,8 +228,7 @@ func resetPasswordHandler(c *gin.Context) {
 		Token       string `json:"token"`
 		NewPassword string `json:"new_password"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 	token := strings.TrimSpace(req.Token)

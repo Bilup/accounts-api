@@ -160,8 +160,7 @@ func setSubscription(c *gin.Context) {
 	}
 
 	var data map[string]any
-	if err := c.ShouldBindJSON(&data); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &data) {
 		return
 	}
 

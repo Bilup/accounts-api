@@ -490,8 +490,7 @@ func registerUser(c *gin.Context) {
 		Captcha  string `json:"captcha"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -681,8 +680,7 @@ func updateUser(c *gin.Context) {
 		Key   string `json:"key"`
 		Value any    `json:"value"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 	authKey := req.Auth
@@ -924,8 +922,7 @@ func updateUserAdmin(c *gin.Context) {
 	}
 
 	var userData map[string]any
-	if err := c.ShouldBindJSON(&userData); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &userData) {
 		return
 	}
 
@@ -1051,8 +1048,7 @@ func deleteUserKey(c *gin.Context) {
 		Auth string `json:"auth"`
 		Key  string `json:"key"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 	authKey := req.Auth
@@ -1310,8 +1306,7 @@ func deleteUserAdmin(c *gin.Context) {
 	var req struct {
 		Username string `json:"username"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -1337,8 +1332,7 @@ func banUserAdmin(c *gin.Context) {
 	var req struct {
 		Username Username `json:"username"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 

@@ -459,8 +459,7 @@ func updateGroup(c *gin.Context) {
 	}
 
 	var jsonBody map[string]any
-	if err := c.ShouldBindJSON(&jsonBody); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &jsonBody) {
 		return
 	}
 

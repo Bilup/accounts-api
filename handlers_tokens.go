@@ -25,8 +25,7 @@ func createSubToken(c *gin.Context) {
 		Websites     []string `json:"websites,omitempty"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -207,8 +206,7 @@ func updateSubToken(c *gin.Context) {
 		Websites    []string `json:"websites,omitempty"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -385,8 +383,7 @@ func renameSubToken(c *gin.Context) {
 		Name string `json:"name"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
+	if !bindJSON(c, &req) {
 		return
 	}
 
