@@ -65,9 +65,6 @@ func ValidateUsername(username Username) (bool, string) {
 	if len(usernameLower) < 3 || len(usernameLower) > 20 {
 		return false, "Username must be between 3 and 20 characters"
 	}
-	if strings.Contains(usernameLower, " ") {
-		return false, "Username cannot contain spaces"
-	}
 	if !usernameAllowedRe.MatchString(usernameLower) {
 		return false, "Username contains invalid characters"
 	}
@@ -81,8 +78,7 @@ func ValidateUsername(username Username) (bool, string) {
 			u = strings.ReplaceAll(u, "9", "i")
 			u = strings.ReplaceAll(u, "0", "o")
 			u = strings.ReplaceAll(u, "8", "b")
-			u = strings.ReplaceAll(u, "@", "a")
-			if strings.Contains(strings.ToLower(u), strings.ToLower(banned)) {
+			if strings.Contains(u, strings.ToLower(banned)) {
 				return false, "Username contains a banned word"
 			}
 		}
