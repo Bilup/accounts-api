@@ -217,6 +217,59 @@ func getSystemStats(c *gin.Context) {
 	c.JSON(200, systems)
 }
 
+func getPostStats(c *gin.Context) {
+	days := 7
+	if s := c.Query("days"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 1 && n <= 90 {
+			days = n
+		}
+	}
+
+	now := time.Now()
+	y, m, d := now.Date()
+	todayStart := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+
+	type bucket struct {
+		Date  string `json:"date"`
+		Start int64  `json:"start"`
+		Count int    `json:"count"`
+	}
+
+	buckets := make([]bucket, days)
+	ends := make([]int64, days)
+	for i := 0; i < days; i++ {
+		dayStart := todayStart.AddDate(0, 0, -(days - 1 - i))
+		buckets[i] = bucket{
+			Date:  dayStart.Format("2006-01-02"),
+			Start: dayStart.UnixMilli(),
+		}
+		ends[i] = dayStart.AddDate(0, 0, 1).UnixMilli()
+	}
+	weekStart := buckets[0].Start
+
+	total := 0
+	postsMutex.RLock()
+	for _, p := range posts {
+		if p.ProfileOnly || p.Timestamp < weekStart {
+			continue
+		}
+		for i := range buckets {
+			if p.Timestamp < ends[i] {
+				buckets[i].Count++
+				total++
+				break
+			}
+		}
+	}
+	postsMutex.RUnlock()
+
+	c.JSON(200, gin.H{
+		"days":    days,
+		"total":   total,
+		"buckets": buckets,
+	})
+}
+
 func getFollowersStats(c *gin.Context) {
 	maxNum := c.Query("max")
 	if maxNum == "" {

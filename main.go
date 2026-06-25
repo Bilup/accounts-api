@@ -85,6 +85,7 @@ func main() {
 		stats.GET("/most_gained", rateLimit("default"), getMostGained)
 		stats.GET("/systems", rateLimit("default"), getSystemStats)
 		stats.GET("/followers", rateLimit("default"), getFollowersStats)
+		stats.GET("/posts", rateLimit("default"), getPostStats)
 	}
 
 	// Systems endpoints
