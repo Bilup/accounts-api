@@ -141,7 +141,7 @@ func createPost(c *gin.Context) {
 		}()
 	}
 
-	c.JSON(201, newPost)
+	c.JSON(201, newPost.ToNet())
 }
 
 func getPostById(id string) *Post {
@@ -228,7 +228,7 @@ func replyToPost(c *gin.Context) {
 		"content":  content,
 	})
 
-	c.JSON(201, newReply)
+	c.JSON(201, newReply.ToNet())
 }
 
 func deletePost(c *gin.Context) {
@@ -496,7 +496,7 @@ func repost(c *gin.Context) {
 		"original_post_id": originalPost.ID,
 	})
 
-	c.JSON(201, newRepost)
+	c.JSON(201, newRepost.ToNet())
 }
 
 func pinPost(c *gin.Context) {

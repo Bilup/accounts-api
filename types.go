@@ -1326,8 +1326,15 @@ type NetPost struct {
 	Likes        []Username `json:"likes,omitempty"`
 	Pinned       bool       `json:"pinned,omitempty"`
 	IsRepost     bool       `json:"is_repost,omitempty"`
-	OriginalPost *Post      `json:"original_post,omitempty"`
+	OriginalPost *NetPost   `json:"original_post,omitempty"`
 	EditedAt     int64      `json:"edited_at,omitempty"`
+}
+
+func resolveUser(u UserId) Username {
+	if name := u.User().GetUsername(); name != "" {
+		return name
+	}
+	return Username(u)
 }
 
 func (p Post) ToNet() NetPost {
@@ -1337,12 +1344,17 @@ func (p Post) ToNet() NetPost {
 		replies = append(replies, reply.ToNet())
 	}
 	for _, like := range p.Likes {
-		likes = append(likes, like.User().GetUsername())
+		likes = append(likes, resolveUser(like))
+	}
+	var original *NetPost
+	if p.OriginalPost != nil {
+		o := p.OriginalPost.ToNet()
+		original = &o
 	}
 	return NetPost{
 		ID:           p.ID,
 		Content:      p.Content,
-		User:         p.User.User().GetUsername(),
+		User:         resolveUser(p.User),
 		Attachment:   p.Attachment,
 		ProfileOnly:  p.ProfileOnly,
 		OS:           p.OS,
@@ -1350,7 +1362,7 @@ func (p Post) ToNet() NetPost {
 		Likes:        likes,
 		Pinned:       p.Pinned,
 		IsRepost:     p.IsRepost,
-		OriginalPost: p.OriginalPost,
+		OriginalPost: original,
 		Timestamp:    p.Timestamp,
 		EditedAt:     p.EditedAt,
 	}
@@ -1375,7 +1387,7 @@ func (r Reply) ToNet() NetReply {
 	return NetReply{
 		ID:        r.ID,
 		Content:   r.Content,
-		User:      r.User.User().GetUsername(),
+		User:      resolveUser(r.User),
 		Timestamp: r.Timestamp,
 	}
 }
