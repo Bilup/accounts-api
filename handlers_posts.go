@@ -281,6 +281,73 @@ func deletePost(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "Post deleted successfully"})
 }
 
+func editPost(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+
+	postID := c.Query("id")
+	if postID == "" {
+		c.JSON(400, gin.H{"error": "Post ID is required"})
+		return
+	}
+
+	content := c.Query("content")
+	if content == "" {
+		c.JSON(400, gin.H{"error": "Content is required"})
+		return
+	}
+
+	if !doesUserOwnKey(user.GetId(), "bd6249d2b87796a25c30b1f1722f784f") {
+		c.JSON(403, gin.H{"error": "Editing posts requires Claw Premium"})
+		return
+	}
+
+	chars := postLimits["content_length_premium"]
+	if len(content) > chars {
+		c.JSON(400, gin.H{"error": "Content exceeds " + strconv.Itoa(chars) + " character limit"})
+		return
+	}
+
+	if containsDerogatory(content) {
+		c.JSON(400, gin.H{"error": "Post contains prohibited language"})
+		return
+	}
+
+	targetPost := getPostById(postID)
+	if targetPost == nil {
+		c.JSON(404, gin.H{"error": "Post not found"})
+		return
+	}
+
+	if targetPost.User != user.GetId() {
+		c.JSON(403, gin.H{"error": "You can only edit your own posts"})
+		return
+	}
+
+	if targetPost.IsRepost {
+		c.JSON(400, gin.H{"error": "Reposts cannot be edited"})
+		return
+	}
+
+	postsMutex.Lock()
+	targetPost.Content = content
+	targetPost.EditedAt = time.Now().UnixMilli()
+	editedAt := targetPost.EditedAt
+	profileOnly := targetPost.ProfileOnly
+	postsMutex.Unlock()
+
+	go savePosts()
+
+	if !profileOnly {
+		go broadcastClawEvent("update_post", map[string]any{
+			"id":   postID,
+			"key":  "content",
+			"data": map[string]any{"content": content, "edited_at": editedAt},
+		})
+	}
+
+	c.JSON(200, gin.H{"message": "Post edited successfully", "edited_at": editedAt})
+}
+
 func ratePost(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 

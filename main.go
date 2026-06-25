@@ -69,6 +69,7 @@ func main() {
 	r.GET("/feed", rateLimit("default"), getFeed)
 	r.GET("/following_feed", rateLimit("default"), requiresAuth, requirePermission(PermViewPosts), getFollowingFeed)
 	r.GET("/delete", requiresAuth, requirePermission(PermDeletePost), deletePost)
+	r.GET("/edit_post", rateLimit("default"), requiresAuth, requirePermission(PermManagePosts), requireStanding(StandingGood), editPost)
 	r.GET("/rate", requiresAuth, requirePermission(PermLikePost), ratePost)
 	r.GET("/repost", rateLimit("default"), requiresAuth, requirePermission(PermRepost), requireStanding(StandingGood), repost)
 	r.GET("/pin_post", requiresAuth, requirePermission(PermManagePosts), pinPost)

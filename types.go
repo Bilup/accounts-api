@@ -1311,6 +1311,7 @@ type Post struct {
 	Pinned       bool     `json:"pinned,omitempty"`
 	IsRepost     bool     `json:"is_repost,omitempty"`
 	OriginalPost *Post    `json:"original_post,omitempty"`
+	EditedAt     int64    `json:"edited_at,omitempty"`
 }
 
 type NetPost struct {
@@ -1326,6 +1327,7 @@ type NetPost struct {
 	Pinned       bool       `json:"pinned,omitempty"`
 	IsRepost     bool       `json:"is_repost,omitempty"`
 	OriginalPost *Post      `json:"original_post,omitempty"`
+	EditedAt     int64      `json:"edited_at,omitempty"`
 }
 
 func (p Post) ToNet() NetPost {
@@ -1350,6 +1352,7 @@ func (p Post) ToNet() NetPost {
 		IsRepost:     p.IsRepost,
 		OriginalPost: p.OriginalPost,
 		Timestamp:    p.Timestamp,
+		EditedAt:     p.EditedAt,
 	}
 }
 
