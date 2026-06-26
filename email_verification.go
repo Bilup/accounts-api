@@ -16,13 +16,17 @@ import (
 
 func generateVerifyToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("failed to generate verify token: " + err.Error())
+	}
 	return "ev_" + base64.RawURLEncoding.EncodeToString(b)
 }
 
 func generateResetToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("failed to generate reset token: " + err.Error())
+	}
 	return "pr_" + base64.RawURLEncoding.EncodeToString(b)
 }
 

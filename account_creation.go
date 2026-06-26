@@ -33,9 +33,9 @@ func createAccount(in AccountCreateInput) (User, error) {
 		return nil, fmt.Errorf("system is required")
 	}
 
-	usersMutex.RLock()
-	usernameExists := false
-	emailExists := false
+	usersMutex.Lock()
+	defer usersMutex.Unlock()
+
 	for _, user := range users {
 		mu := getMutexForUser(user)
 		mu.Lock()
@@ -43,25 +43,12 @@ func createAccount(in AccountCreateInput) (User, error) {
 		em, _ := user["email"].(string)
 		mu.Unlock()
 		if Username(uname).ToLower() == usernameLower {
-			usernameExists = true
-			break
+			return nil, fmt.Errorf("username already in use")
 		}
 		if strings.EqualFold(em, in.Email) {
-			emailExists = true
-			break
+			return nil, fmt.Errorf("email already in use")
 		}
 	}
-	usersMutex.RUnlock()
-
-	if usernameExists {
-		return nil, fmt.Errorf("username already in use")
-	}
-	if emailExists {
-		return nil, fmt.Errorf("email already in use")
-	}
-
-	usersMutex.Lock()
-	defer usersMutex.Unlock()
 
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(in.RequestIP)))
 	provider := in.Provider

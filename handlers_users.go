@@ -2,6 +2,7 @@ package main
 
 import (
 	crypto_rand "crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -817,7 +818,7 @@ func updateUser(c *gin.Context) {
 		envOnce.Do(loadEnvFile)
 		ADMIN_TOKEN := os.Getenv("ADMIN_TOKEN")
 		adminToken := c.Query("token")
-		admin = adminToken != "" && ADMIN_TOKEN != "" && adminToken == ADMIN_TOKEN
+		admin = adminToken != "" && ADMIN_TOKEN != "" && subtle.ConstantTimeCompare([]byte(adminToken), []byte(ADMIN_TOKEN)) == 1
 	}
 
 	totalSize := findUserSize(username)

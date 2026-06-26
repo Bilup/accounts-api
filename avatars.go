@@ -501,6 +501,19 @@ func sendEmpty(c *gin.Context) {
 	c.Data(http.StatusOK, "image/png", buf.Bytes())
 }
 
+const maxImagePixels = 50 * 1000 * 1000
+
+func checkImageDimensions(imageData []byte) error {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(imageData))
+	if err != nil {
+		return fmt.Errorf("error decoding image: %w", err)
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > maxImagePixels {
+		return fmt.Errorf("image too large")
+	}
+	return nil
+}
+
 // savePfp decodes the data-URI image and writes the resized profile picture
 // directly to disk. No HTTP round-trip is performed.
 func savePfp(dataURI string, user *User) error {
@@ -516,6 +529,9 @@ func savePfp(dataURI string, user *User) error {
 	imageData, err := base64.StdEncoding.DecodeString(parts[1])
 	if err != nil {
 		return fmt.Errorf("invalid image data: %w", err)
+	}
+	if err := checkImageDimensions(imageData); err != nil {
+		return err
 	}
 	os.MkdirAll(avatarBaseDir, 0755)
 	username := user.GetUsername().ToLower()
@@ -836,6 +852,9 @@ func saveBanner(dataURI string, user *User) error {
 	}
 	if len(imageData) > 10*1024*1024 {
 		return fmt.Errorf("image too large")
+	}
+	if err := checkImageDimensions(imageData); err != nil {
+		return err
 	}
 	img, _, err := image.Decode(bytes.NewReader(imageData))
 	if err != nil {

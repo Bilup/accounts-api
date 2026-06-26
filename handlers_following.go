@@ -39,7 +39,11 @@ func followUser(c *gin.Context) {
 	followersMutex.Lock()
 	// Ensure target user has an entry in followers data
 	if _, exists := followersData[targetId]; !exists {
-		followersData[targetId] = FollowerData{Followers: make([]UserId, 0)}
+		followersData[targetId] = FollowerData{
+			Followers: make([]UserId, 0),
+			Username:  targetId.User().GetUsername(),
+			UserId:    targetId,
+		}
 	}
 
 	// Check if already following

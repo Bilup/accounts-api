@@ -92,7 +92,7 @@ func createGroup(c *gin.Context) {
 
 	entryFeeStr := c.DefaultQuery("entry_fee", "0")
 	entryFee, err := strconv.ParseFloat(entryFeeStr, 64)
-	if err != nil || entryFee < 0 {
+	if err != nil || entryFee < 0 || !isFiniteAmount(entryFee) {
 		c.JSON(400, gin.H{"error": "Invalid entry fee"})
 		return
 	}
@@ -895,6 +895,10 @@ func uploadGroupIcon(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "Failed to read image"})
 		return
 	}
+	if err := checkImageDimensions(imageData); err != nil {
+		c.JSON(400, gin.H{"error": "Invalid image format"})
+		return
+	}
 	img, _, err := image.Decode(bytes.NewReader(imageData))
 	if err != nil {
 		c.JSON(400, gin.H{"error": "Invalid image format"})
@@ -973,6 +977,11 @@ func uploadGroupBanner(c *gin.Context) {
 	imageData, err := io.ReadAll(file)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to read image"})
+		return
+	}
+
+	if err := checkImageDimensions(imageData); err != nil {
+		c.JSON(400, gin.H{"error": "Invalid image format"})
 		return
 	}
 

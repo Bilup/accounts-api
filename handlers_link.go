@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,13 +13,13 @@ import (
 
 var usedCodesMutex sync.RWMutex
 var usedCodes = make(map[string]string)
-var counter int64
+var counter atomic.Int64
 
 func generateUniqueLinkCode() string {
 	for {
-		counter++
+		c := counter.Add(1)
 		timestamp := time.Now().UnixNano()
-		hash := md5.Sum([]byte(fmt.Sprintf("%d-%d", timestamp, counter)))
+		hash := md5.Sum(fmt.Appendf(nil, "%d-%d", timestamp, c))
 		code := strings.ToUpper(fmt.Sprintf("%x", hash)[:6])
 
 		usedCodesMutex.Lock()

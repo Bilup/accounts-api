@@ -26,13 +26,17 @@ import (
 // Helper functions
 func generateToken() string {
 	bytes := make([]byte, 16)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		panic("failed to generate token: " + err.Error())
+	}
 	return hex.EncodeToString(bytes)
 }
 
 func generateShortToken() string {
 	bytes := make([]byte, 8)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		panic("failed to generate token: " + err.Error())
+	}
 	return hex.EncodeToString(bytes)
 }
 
@@ -177,7 +181,14 @@ func requireModerator(c *gin.Context) {
 	c.Next()
 }
 
+func isFiniteAmount(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
 func normalizeEscrowAmount(raw float64) (float64, bool) {
+	if math.IsNaN(raw) || math.IsInf(raw, 0) {
+		return 0, false
+	}
 	amt := roundVal(raw)
 	if amt < 0.01 {
 		return 0, false

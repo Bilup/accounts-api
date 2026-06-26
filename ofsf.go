@@ -565,10 +565,22 @@ func extractIndex(v any) int {
 	}
 }
 
+func isValidFileUUID(uuid string) bool {
+	if len(uuid) != 32 {
+		return false
+	}
+	for _, c := range uuid {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
 // handleAddUnsafe assumes the lock is already held
 func (fs *FileSystem) handleAddUnsafe(username Username, change UpdateChange) error {
-	if len(change.UUID) != 32 {
-		return fmt.Errorf("invalid UUID length: %d", len(change.UUID))
+	if !isValidFileUUID(change.UUID) {
+		return fmt.Errorf("invalid UUID")
 	}
 	userDir := filepath.Join(fileDir, string(username))
 	if err := os.MkdirAll(userDir, 0755); err != nil {
@@ -582,7 +594,7 @@ func (fs *FileSystem) handleAddUnsafe(username Username, change UpdateChange) er
 	}
 
 	dta, ok := change.Dta.([]any)
-	if !ok || len(dta) > fileEntrySize {
+	if !ok || len(dta) != fileEntrySize {
 		return fmt.Errorf("invalid entry data")
 	}
 
@@ -643,6 +655,9 @@ func (fs *FileSystem) handleReplaceUnsafe(username Username, change UpdateChange
 
 // handleDeleteUnsafe assumes the lock is already held
 func (fs *FileSystem) handleDeleteUnsafe(username Username, change UpdateChange) error {
+	if !isValidFileUUID(change.UUID) {
+		return fmt.Errorf("invalid UUID")
+	}
 	filePath := filepath.Join(fileDir, string(username), change.UUID+".json")
 	os.Remove(filePath)
 
@@ -878,6 +893,13 @@ func (fs *FileSystem) GetFileStats(username Username, uuids []string) ([]FileSta
 	stats := make([]FileStat, 0, len(uuids))
 
 	for _, uuid := range uuids {
+		if !isValidFileUUID(uuid) {
+			stats = append(stats, FileStat{
+				UUID: uuid,
+				Ok:   false,
+			})
+			continue
+		}
 		path := filepath.Join(userDir, uuid+".json")
 
 		info, err := os.Stat(path)
@@ -984,6 +1006,9 @@ func (fs *FileSystem) migrateFromLegacy(username Username) error {
 
 // getFileByUUIDUnsafe assumes the lock is already held
 func (fs *FileSystem) getFileByUUIDUnsafe(username Username, uuid string) (FileEntry, error) {
+	if !isValidFileUUID(uuid) {
+		return nil, fmt.Errorf("invalid UUID")
+	}
 	userDir := fs.GetUserPath(username)
 
 	filePath := filepath.Join(userDir, uuid+".json")
@@ -1017,6 +1042,9 @@ func (fs *FileSystem) GetFileByUUID(username Username, uuid string) (FileEntry, 
 
 // setFileByUUIDUnsafe assumes the lock is already held
 func (fs *FileSystem) setFileByUUIDUnsafe(username Username, uuid string, file FileEntry) error {
+	if !isValidFileUUID(uuid) {
+		return fmt.Errorf("invalid UUID")
+	}
 	userDir := fs.GetUserPath(username)
 	if err := os.MkdirAll(userDir, 0755); err != nil {
 		return fmt.Errorf("failed to create user directory: %w", err)
@@ -1089,6 +1117,9 @@ func (fs *FileSystem) GetFilesByUUIDs(username Username, uuids []string) (map[st
 	userDir := fs.GetUserPath(username)
 
 	for _, uuid := range uuids {
+		if !isValidFileUUID(uuid) {
+			continue
+		}
 		filePath := filepath.Join(userDir, uuid+".json")
 
 		data, err := os.ReadFile(filePath)

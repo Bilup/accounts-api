@@ -45,7 +45,7 @@ func giftCosmetic(c *gin.Context) {
 	}
 
 	// Look up cosmetic
-	entry, exists := getCatalogEntryByIdForWrite(cosmeticId)
+	entry, exists := getCatalogEntrySnapshot(cosmeticId)
 	if !exists {
 		c.JSON(404, gin.H{"error": "Cosmetic not found"})
 		return
@@ -147,6 +147,7 @@ func giftCosmetic(c *gin.Context) {
 	}
 
 	entry.Purchases++
+	incrementCosmeticPurchases(cosmeticId)
 
 	giftId := generateToken()
 	cosmeticGift := CosmeticGift{

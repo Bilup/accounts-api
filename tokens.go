@@ -271,13 +271,17 @@ func saveTokenStore(userId UserId, store *TokenStore) error {
 
 func generateSubTokenID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("failed to generate sub-token id: " + err.Error())
+	}
 	return "st_" + base64.URLEncoding.EncodeToString(b)
 }
 
 func generateSubTokenValue() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("failed to generate sub-token value: " + err.Error())
+	}
 	return "rotur_st_" + base64.URLEncoding.EncodeToString(b)
 }
 

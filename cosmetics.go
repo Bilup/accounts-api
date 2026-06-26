@@ -203,16 +203,29 @@ func getCatalogEntryById(id string) (*CosmeticCatalogEntry, bool) {
 	return nil, false
 }
 
-func getCatalogEntryByIdForWrite(id string) (*CosmeticCatalogEntry, bool) {
+func getCatalogEntrySnapshot(id string) (*CosmeticCatalogEntry, bool) {
+	cosmeticsCatalogMu.RLock()
+	defer cosmeticsCatalogMu.RUnlock()
+
+	for i := range cosmeticsCatalog {
+		if cosmeticsCatalog[i].Id == id {
+			entry := cosmeticsCatalog[i]
+			return &entry, true
+		}
+	}
+	return nil, false
+}
+
+func incrementCosmeticPurchases(id string) {
 	cosmeticsCatalogMu.Lock()
 	defer cosmeticsCatalogMu.Unlock()
 
 	for i := range cosmeticsCatalog {
 		if cosmeticsCatalog[i].Id == id {
-			return &cosmeticsCatalog[i], true
+			cosmeticsCatalog[i].Purchases++
+			return
 		}
 	}
-	return nil, false
 }
 
 func getShop(c *gin.Context) {
@@ -384,7 +397,7 @@ func purchaseCosmetic(c *gin.Context) {
 	userCosmeticsMu.Lock()
 	defer userCosmeticsMu.Unlock()
 
-	entry, exists := getCatalogEntryByIdForWrite(id)
+	entry, exists := getCatalogEntrySnapshot(id)
 	if !exists {
 		c.JSON(404, gin.H{"error": "Cosmetic not found"})
 		return
@@ -414,6 +427,7 @@ func purchaseCosmetic(c *gin.Context) {
 	if entry.PricingType == CosmeticFree || entry.Price == 0 {
 		uc.OwnedCosmetics = append(uc.OwnedCosmetics, id)
 		entry.Purchases++
+		incrementCosmeticPurchases(id)
 		if err := saveUserCosmetics(userId, uc); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save cosmetics data"})
 			return
@@ -497,6 +511,7 @@ func purchaseCosmetic(c *gin.Context) {
 	}
 
 	entry.Purchases++
+	incrementCosmeticPurchases(id)
 
 	uc.OwnedCosmetics = append(uc.OwnedCosmetics, id)
 	if err := saveUserCosmetics(userId, uc); err != nil {

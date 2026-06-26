@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"os"
 	"strings"
 
@@ -114,7 +115,8 @@ func isAdmin(c *gin.Context) bool {
 	if ADMIN_TOKEN == "" {
 		return false
 	}
-	return extractAdminToken(c.GetHeader("Authorization")) == ADMIN_TOKEN
+	provided := extractAdminToken(c.GetHeader("Authorization"))
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(ADMIN_TOKEN)) == 1
 }
 
 func authenticateAdmin(c *gin.Context) bool {
@@ -124,7 +126,8 @@ func authenticateAdmin(c *gin.Context) bool {
 		c.JSON(500, gin.H{"error": "ADMIN_TOKEN environment variable not set"})
 		return false
 	}
-	if extractAdminToken(c.GetHeader("Authorization")) != ADMIN_TOKEN {
+	provided := extractAdminToken(c.GetHeader("Authorization"))
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(ADMIN_TOKEN)) != 1 {
 		c.JSON(403, gin.H{"error": "Invalid admin authentication"})
 		return false
 	}

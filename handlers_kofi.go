@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,8 +25,8 @@ func handleKofiTransaction(c *gin.Context) {
 		return
 	}
 	verification := parsedData["verification_token"]
-	fmt.Println("Verification: " + getStringOrEmpty(verification))
-	if verification != os.Getenv("KOFI_CODE") {
+	kofiCode := os.Getenv("KOFI_CODE")
+	if kofiCode == "" || subtle.ConstantTimeCompare([]byte(getStringOrEmpty(verification)), []byte(kofiCode)) != 1 {
 		c.JSON(400, gin.H{"error": "Invalid verification code"})
 		return
 	}

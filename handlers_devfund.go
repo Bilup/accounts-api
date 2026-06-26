@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"os"
 	"strings"
 	"time"
@@ -177,7 +178,7 @@ func escrowRelease(c *gin.Context) {
 func escrowReleaseService(c *gin.Context) {
 	key := c.GetHeader("X-Devfund-Key")
 	expected := os.Getenv("DEVFUND_SERVICE_KEY")
-	if expected == "" || key != expected {
+	if expected == "" || subtle.ConstantTimeCompare([]byte(key), []byte(expected)) != 1 {
 		c.JSON(403, gin.H{"error": "Invalid service key"})
 		return
 	}
