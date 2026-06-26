@@ -244,6 +244,7 @@ func avatarHandler(c *gin.Context) {
 	tier, _ := getUserTierCached(username)
 
 	forceStill := shouldConvertToStill(c, tier, contentType, metaErr)
+	srcIsGif := contentType == "image/gif"
 
 	var sb strings.Builder
 	if metaErr != nil {
@@ -267,7 +268,7 @@ func avatarHandler(c *gin.Context) {
 	cacheKey := sb.String()
 
 	if forceStill {
-		contentType = "image/jpeg"
+		contentType = "image/png"
 	}
 
 	modifier := sizeStr != "" || radiusStr != "" || forceStill
@@ -324,11 +325,11 @@ func avatarHandler(c *gin.Context) {
 		}
 	}
 
-	if contentType == "image/gif" && forceStill {
+	if srcIsGif && forceStill {
 		if img, err := decodeFirstGIFFrame(imageData); err == nil {
-			if encoded, err := encodeJPEG(img, 85); err == nil {
+			if encoded, err := encodePNG(img); err == nil {
 				imageData = encoded
-				contentType = "image/jpeg"
+				contentType = "image/png"
 			}
 		}
 	}
@@ -405,10 +406,10 @@ func avatarHandler(c *gin.Context) {
 				png.Encode(buf, resized)
 			} else {
 				jpeg.Encode(buf, resized, &jpeg.Options{Quality: 85})
+				contentType = "image/jpeg"
 			}
 			imageData = make([]byte, buf.Len())
 			copy(imageData, buf.Bytes())
-			contentType = "image/jpeg"
 		} else {
 			if radiusStr != "" {
 				buf := avatarBufPool.Get().(*bytes.Buffer)

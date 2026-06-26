@@ -425,6 +425,18 @@ func decodeFirstGIFFrame(data []byte) (image.Image, error) {
 	return dst, nil
 }
 
+func encodePNG(img image.Image) ([]byte, error) {
+	buf := avatarBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer avatarBufPool.Put(buf)
+	if err := png.Encode(buf, img); err != nil {
+		return nil, err
+	}
+	result := make([]byte, buf.Len())
+	copy(result, buf.Bytes())
+	return result, nil
+}
+
 func encodeJPEG(img image.Image, quality int) ([]byte, error) {
 	if quality <= 0 {
 		quality = 85
