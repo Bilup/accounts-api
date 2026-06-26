@@ -11,7 +11,7 @@ import (
 
 // escrowTransfer - Transfer credits to escrow (no tax for internal transfers)
 func escrowTransfer(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	var req struct {
 		Amount     float64 `json:"amount"`
@@ -30,8 +30,7 @@ func escrowTransfer(c *gin.Context) {
 		return
 	}
 
-	if req.PetitionID == "" {
-		c.JSON(400, gin.H{"error": "Petition ID is required"})
+	if !requireField(c, req.PetitionID, "Petition ID is required") {
 		return
 	}
 
@@ -54,8 +53,6 @@ func escrowTransfer(c *gin.Context) {
 		newBal = 0
 	}
 
-	user.SetBalance(newBal)
-
 	// Add escrow transaction to sender
 	now := time.Now().UnixMilli()
 	note := strings.TrimSpace(req.Note)
@@ -66,14 +63,13 @@ func escrowTransfer(c *gin.Context) {
 		note = note[:50]
 	}
 
-	user.addTransaction(Transaction{
+	user.applyTransaction(newBal, Transaction{
 		Note:       note,
 		User:       Username("rotur").Id(),
 		Timestamp:  now,
 		Amount:     nAmount,
 		Type:       "escrow_out",
 		PetitionId: req.PetitionID,
-		NewTotal:   newBal,
 	})
 
 	go saveUsers()
@@ -102,12 +98,10 @@ func performEscrowRelease(c *gin.Context, req escrowReleaseRequest) {
 		c.JSON(400, gin.H{"error": "Minimum amount is 0.01"})
 		return
 	}
-	if req.ToUsername == "" {
-		c.JSON(400, gin.H{"error": "Recipient username is required"})
+	if !requireField(c, req.ToUsername, "Recipient username is required") {
 		return
 	}
-	if req.PetitionID == "" {
-		c.JSON(400, gin.H{"error": "Petition ID is required"})
+	if !requireField(c, req.PetitionID, "Petition ID is required") {
 		return
 	}
 
@@ -122,7 +116,6 @@ func performEscrowRelease(c *gin.Context, req escrowReleaseRequest) {
 		toCurrency = float64(0)
 	}
 	newBal := roundVal(toCurrency + nAmount)
-	toUser.SetBalance(newBal)
 
 	now := time.Now().UnixMilli()
 	note := strings.TrimSpace(req.Note)
@@ -133,14 +126,13 @@ func performEscrowRelease(c *gin.Context, req escrowReleaseRequest) {
 		note = note[:50]
 	}
 
-	toUser.addTransaction(Transaction{
+	toUser.applyTransaction(newBal, Transaction{
 		Note:       note,
 		User:       Username("rotur").Id(),
 		Timestamp:  now,
 		Amount:     nAmount,
 		Type:       "escrow_in",
 		PetitionId: req.PetitionID,
-		NewTotal:   newBal,
 	})
 
 	go saveUsers()
@@ -156,10 +148,10 @@ func performEscrowRelease(c *gin.Context, req escrowReleaseRequest) {
 
 // escrowRelease - Release escrow credits to developer (admin only)
 func escrowRelease(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	// Only allow mist (admin) to release escrow
-	if user.GetUsername().ToLower() != "mist" {
+	if !isHardcodedAdmin(user.GetUsername()) {
 		c.JSON(403, gin.H{"error": "Admin access required"})
 		return
 	}

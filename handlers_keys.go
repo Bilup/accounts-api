@@ -24,7 +24,7 @@ type keyCreationResp struct {
 }
 
 func createKey(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	name := c.Query("name")
 	if name == "" {
@@ -136,7 +136,7 @@ func createKey(c *gin.Context) {
 }
 
 func getMyKeys(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	userId := user.GetId()
 
@@ -166,8 +166,7 @@ func checkKey(c *gin.Context) {
 	userId := username.Id()
 	keyToCheck := c.Query("key")
 
-	if keyToCheck == "" {
-		c.JSON(400, gin.H{"error": "Key is required"})
+	if !requireField(c, keyToCheck, "Key is required") {
 		return
 	}
 
@@ -182,7 +181,7 @@ func checkKey(c *gin.Context) {
 
 func revokeKey(c *gin.Context) {
 	id := c.Param("id")
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	targetId := Username(c.Query("user")).Id()
 	if !accountExists(targetId) {
@@ -218,7 +217,7 @@ func revokeKey(c *gin.Context) {
 
 func deleteKey(c *gin.Context) {
 	id := c.Param("id")
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	keysMutex.Lock()
 	defer keysMutex.Unlock()
@@ -252,7 +251,7 @@ func updateKey(c *gin.Context) {
 	id := c.Param("id")
 	key := c.Query("key")
 	data := c.Query("data")
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	if key == "" {
 		c.JSON(403, ErrorResponse{Error: "update key and data are required"})
 		return
@@ -289,11 +288,10 @@ func updateKey(c *gin.Context) {
 
 func setKeyName(c *gin.Context) {
 	id := c.Param("id")
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	name := c.Query("name")
-	if name == "" {
-		c.JSON(400, gin.H{"error": "Name is required"})
+	if !requireField(c, name, "Name is required") {
 		return
 	}
 
@@ -337,7 +335,7 @@ func getKey(c *gin.Context) {
 
 func adminAddUserToKey(c *gin.Context) {
 	id := c.Param("id")
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	targetUser := Username(c.Query("user"))
 	if targetUser == "" {
@@ -378,7 +376,7 @@ func adminAddUserToKey(c *gin.Context) {
 
 func adminRemoveUserFromKey(c *gin.Context) {
 	id := c.Param("id")
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	targetUser := Username(c.Query("user"))
 	if targetUser == "" {
@@ -417,7 +415,7 @@ func adminRemoveUserFromKey(c *gin.Context) {
 
 func buyKey(c *gin.Context) {
 	id := c.Param("id")
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	keysMutex.Lock()
 	defer keysMutex.Unlock()
@@ -505,13 +503,11 @@ func buyKey(c *gin.Context) {
 			if userIndex != -1 {
 				// Flexible extraction for sys.currency
 				newBal := user.GetCredits() - float64(keys[i].Price)
-				user.SetBalance(newBal)
-				user.addTransaction(Transaction{
+				user.applyTransaction(newBal, Transaction{
 					Note:      "key purchase",
 					User:      user.GetId(),
 					Amount:    float64(keys[i].Price),
 					Type:      "key_buy",
-					NewTotal:  newBal,
 					Timestamp: time.Now().UnixMilli(),
 					KeyName:   keys[i].Name,
 					KeyId:     keys[i].Key,
@@ -524,13 +520,11 @@ func buyKey(c *gin.Context) {
 					// 10% tax on purchase
 					value := float64(keys[i].Price) * 0.9
 					newBal := ownerCurrency + value
-					owner.SetBalance(newBal)
-					owner.addTransaction(Transaction{
+					owner.applyTransaction(newBal, Transaction{
 						Note:      "key purchase",
 						User:      user.GetId(),
 						Amount:    float64(keys[i].Price),
 						Type:      "key_sale",
-						NewTotal:  newBal,
 						Timestamp: time.Now().UnixMilli(),
 						KeyName:   keys[i].Name,
 						KeyId:     keys[i].Key,
@@ -564,7 +558,7 @@ func buyKey(c *gin.Context) {
 
 func cancelKey(c *gin.Context) {
 	id := c.Param("id")
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	userId := user.GetId()
 
@@ -589,18 +583,7 @@ func cancelKey(c *gin.Context) {
 				return
 			}
 
-			var nextBilling int64
-			switch v := userData.NextBilling.(type) {
-			case float64:
-				nextBilling = int64(v)
-			case int64:
-				nextBilling = v
-			case int:
-				nextBilling = int64(v)
-			default:
-				c.JSON(400, ErrorResponse{Error: "Invalid next_billing type"})
-				return
-			}
+			nextBilling := getInt64OrDefault(userData.NextBilling, 0)
 
 			// We always store cancel_at as unix ms to match other per-user billing fields.
 			if nextBilling < 10_000_000_000 {
@@ -630,10 +613,10 @@ func cancelKey(c *gin.Context) {
 }
 
 func debugSubscriptionsEndpoint(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	// Only allow admin users to access debug info
-	if user.GetUsername().ToLower() != "mist" {
+	if !isHardcodedAdmin(user.GetUsername()) {
 		c.JSON(403, gin.H{"error": "Admin access required"})
 		return
 	}
@@ -790,13 +773,11 @@ func checkSubscriptions() {
 							continue
 						}
 						currencyFloat -= price
-						purchaser.SetBalance(currencyFloat)
-						purchaser.addTransaction(Transaction{
+						purchaser.applyTransaction(currencyFloat, Transaction{
 							Note:      "key purchase",
 							User:      snap.Key.Creator,
 							Amount:    price,
 							Type:      "key_buy",
-							NewTotal:  currencyFloat,
 							Timestamp: time.Now().UnixMilli(),
 							KeyName:   snap.Key.Name,
 							KeyId:     snap.Key.Key,
@@ -805,13 +786,11 @@ func checkSubscriptions() {
 						// 10% tax on purchase
 						value := price * 0.9
 						newBal := snap.Owner.GetCredits() + value
-						snap.Owner.SetBalance(newBal)
-						snap.Owner.addTransaction(Transaction{
+						snap.Owner.applyTransaction(newBal, Transaction{
 							Note:      "key purchase",
 							User:      username.Id(),
 							Amount:    value,
 							Type:      "key_sale",
-							NewTotal:  newBal,
 							Timestamp: time.Now().UnixMilli(),
 							KeyName:   snap.Key.Name,
 							KeyId:     snap.Key.Key,
@@ -888,18 +867,7 @@ func debugSubscriptions() {
 
 		for username, userData := range key.Users {
 			if userData.NextBilling != nil {
-				var nextBilling int64
-				switch v := userData.NextBilling.(type) {
-				case float64:
-					nextBilling = int64(v)
-				case int64:
-					nextBilling = v
-				case int:
-					nextBilling = int64(v)
-				default:
-					log.Printf("  User %s: Invalid NextBilling type", username)
-					continue
-				}
+				nextBilling := getInt64OrDefault(userData.NextBilling, 0)
 
 				nextBillingTime := time.Unix(nextBilling/1000, 0)
 				timeUntilBilling := time.Until(nextBillingTime)

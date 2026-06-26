@@ -109,8 +109,7 @@ func sendResetEmail(toEmail string, username Username, token string) {
 
 func verifyEmailHandler(c *gin.Context) {
 	token := c.Query("token")
-	if token == "" {
-		c.JSON(400, gin.H{"error": "token is required"})
+	if !requireField(c, token, "token is required") {
 		return
 	}
 	usersMutex.RLock()
@@ -136,14 +135,13 @@ func verifyEmailHandler(c *gin.Context) {
 }
 
 func resendVerificationHandler(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	if user.Get("sys.email_verified") == true {
 		c.JSON(400, gin.H{"error": "Email is already verified"})
 		return
 	}
 	email := user.GetEmail()
-	if email == "" {
-		c.JSON(400, gin.H{"error": "No email on file"})
+	if !requireField(c, email, "No email on file") {
 		return
 	}
 	now := time.Now().UnixMilli()
@@ -161,7 +159,7 @@ func resendVerificationHandler(c *gin.Context) {
 }
 
 func changePasswordHandler(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	var req struct {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`

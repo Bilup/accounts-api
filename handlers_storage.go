@@ -349,34 +349,7 @@ func deepCopyValue(v any) any {
 }
 
 func loadFollowers() {
-	followersMutex.Lock()
-
-	if _, err := os.Stat(FOLLOWERS_FILE_PATH); os.IsNotExist(err) {
-		followersData = make(map[UserId]FollowerData)
-		followingCountMap = make(map[UserId]int)
-		followersMutex.Unlock()
-		return
-	}
-
-	data, err := os.ReadFile(FOLLOWERS_FILE_PATH)
-	if err != nil {
-		log.Printf("Error reading followers file: %v", err)
-		followersData = make(map[UserId]FollowerData)
-		followingCountMap = make(map[UserId]int)
-		followersMutex.Unlock()
-		return
-	}
-
-	var tempData map[UserId]FollowerData
-	if err := json.Unmarshal(data, &tempData); err != nil {
-		log.Printf("Error unmarshaling followers: %v", err)
-		followersData = make(map[UserId]FollowerData)
-		followingCountMap = make(map[UserId]int)
-		followersMutex.Unlock()
-		return
-	}
-
-	followersMutex.Unlock()
+	tempData := loadJSONOrDefault(FOLLOWERS_FILE_PATH, map[UserId]FollowerData{})
 
 	validFollowersData := make(map[UserId]FollowerData)
 	for k, v := range tempData {
@@ -416,28 +389,26 @@ func saveFollowers() {
 	saveJsonFile(FOLLOWERS_FILE_PATH, followersData)
 }
 
+func loadJSONOrDefault[T any](path string, def T) T {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("Error reading %s: %v", path, err)
+		}
+		return def
+	}
+	var v T
+	if err := json.Unmarshal(data, &v); err != nil {
+		log.Printf("Error unmarshaling %s: %v", path, err)
+		return def
+	}
+	return v
+}
+
 func loadPosts() {
 	postsMutex.Lock()
 	defer postsMutex.Unlock()
-
-	if _, err := os.Stat(LOCAL_POSTS_PATH); os.IsNotExist(err) {
-		posts = make([]Post, 0)
-		return
-	}
-
-	data, err := os.ReadFile(LOCAL_POSTS_PATH)
-	if err != nil {
-		log.Printf("Error reading posts file: %v", err)
-		posts = make([]Post, 0)
-		return
-	}
-
-	if err := json.Unmarshal(data, &posts); err != nil {
-		log.Printf("Error unmarshaling posts: %v", err)
-		posts = make([]Post, 0)
-		return
-	}
-
+	posts = loadJSONOrDefault(LOCAL_POSTS_PATH, []Post{})
 	log.Printf("Loaded %d posts", len(posts))
 }
 
@@ -450,25 +421,7 @@ func savePosts() {
 func loadItems() {
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
-
-	if _, err := os.Stat(ITEMS_FILE_PATH); os.IsNotExist(err) {
-		items = make([]Item, 0)
-		return
-	}
-
-	data, err := os.ReadFile(ITEMS_FILE_PATH)
-	if err != nil {
-		log.Printf("Error reading items file: %v", err)
-		items = make([]Item, 0)
-		return
-	}
-
-	if err := json.Unmarshal(data, &items); err != nil {
-		log.Printf("Error unmarshaling items: %v", err)
-		items = make([]Item, 0)
-		return
-	}
-
+	items = loadJSONOrDefault(ITEMS_FILE_PATH, []Item{})
 	log.Printf("Loaded %d items", len(items))
 }
 
@@ -482,23 +435,7 @@ func loadKeys() {
 	keysMutex.Lock()
 	defer keysMutex.Unlock()
 
-	if _, err := os.Stat(KEYS_FILE_PATH); os.IsNotExist(err) {
-		keys = make([]Key, 0)
-		return
-	}
-
-	data, err := os.ReadFile(KEYS_FILE_PATH)
-	if err != nil {
-		log.Printf("Error reading keys file: %v", err)
-		keys = make([]Key, 0)
-		return
-	}
-
-	if err := json.Unmarshal(data, &keys); err != nil {
-		log.Printf("Error unmarshaling keys: %v", err)
-		keys = make([]Key, 0)
-		return
-	}
+	keys = loadJSONOrDefault(KEYS_FILE_PATH, []Key{})
 
 	keyStringToIdxInner := make(map[string]int, len(keys))
 	for i, k := range keys {
@@ -523,25 +460,7 @@ func saveKeys() {
 func loadSystems() {
 	systemsMutex.Lock()
 	defer systemsMutex.Unlock()
-
-	if _, err := os.Stat(SYSTEMS_FILE_PATH); os.IsNotExist(err) {
-		systems = make(map[string]System)
-		return
-	}
-
-	data, err := os.ReadFile(SYSTEMS_FILE_PATH)
-	if err != nil {
-		log.Printf("Error reading systems file: %v", err)
-		systems = make(map[string]System)
-		return
-	}
-
-	if err := json.Unmarshal(data, &systems); err != nil {
-		log.Printf("Error unmarshaling systems: %v", err)
-		systems = make(map[string]System)
-		return
-	}
-
+	systems = loadJSONOrDefault(SYSTEMS_FILE_PATH, map[string]System{})
 	log.Printf("Loaded %d systems", len(systems))
 }
 
@@ -554,25 +473,7 @@ func saveSystems() {
 func loadEventsHistory() {
 	eventsHistoryMutex.Lock()
 	defer eventsHistoryMutex.Unlock()
-
-	if _, err := os.Stat(EVENTS_HISTORY_PATH); os.IsNotExist(err) {
-		eventsHistory = make(map[UserId][]Event)
-		return
-	}
-
-	data, err := os.ReadFile(EVENTS_HISTORY_PATH)
-	if err != nil {
-		log.Printf("Error reading events history file: %v", err)
-		eventsHistory = make(map[UserId][]Event)
-		return
-	}
-
-	if err := json.Unmarshal(data, &eventsHistory); err != nil {
-		log.Printf("Error unmarshaling events history: %v", err)
-		eventsHistory = make(map[UserId][]Event)
-		return
-	}
-
+	eventsHistory = loadJSONOrDefault(EVENTS_HISTORY_PATH, map[UserId][]Event{})
 	log.Printf("Loaded %d events history", len(eventsHistory))
 }
 
@@ -629,20 +530,24 @@ func flushAll() {
 	saveCosmeticGifts()
 }
 
-func watchUsersFile() {
+func watchFile(path string, reload func()) {
 	var lastMtime time.Time
-	if stat, err := os.Stat(USERS_FILE_PATH); err == nil {
+	if stat, err := os.Stat(path); err == nil {
 		lastMtime = stat.ModTime()
 	}
 
 	for {
 		time.Sleep(500 * time.Millisecond)
-		if stat, err := os.Stat(USERS_FILE_PATH); err == nil {
+		if stat, err := os.Stat(path); err == nil {
 			if stat.ModTime().After(lastMtime) {
 				time.Sleep(500 * time.Millisecond)
-				loadUsers()
+				reload()
 				lastMtime = stat.ModTime()
 			}
 		}
 	}
+}
+
+func watchUsersFile() {
+	watchFile(USERS_FILE_PATH, loadUsers)
 }

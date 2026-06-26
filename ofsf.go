@@ -80,7 +80,7 @@ type FileStat struct {
 var fs *FileSystem = NewFileSystem()
 
 func updateFiles(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -112,8 +112,27 @@ func updateFiles(c *gin.Context) {
 	c.JSON(statusCode, result)
 }
 
+func ofsfErrorf(format string, a ...any) {
+	fmt.Printf("\033[91m[-] OFSF Error\033[0m | "+format+"\n", a...)
+}
+
+func ofsfOkf(format string, a ...any) {
+	fmt.Printf("\033[92m[+] OFSF\033[0m | "+format+"\n", a...)
+}
+
+func ofsfWarnf(format string, a ...any) {
+	fmt.Printf("\033[93m[~] OFSF\033[0m | "+format+"\n", a...)
+}
+
+func sendOctetStream(c *gin.Context, data []byte) {
+	c.Header("Content-Length", fmt.Sprintf("%d", len(data)))
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Data(http.StatusOK, "application/octet-stream", data)
+}
+
 func getFilesByUUIDs(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	var req GetFilesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -131,7 +150,7 @@ func getFilesByUUIDs(c *gin.Context) {
 }
 
 func getUserFileSize(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	username := user.GetUsername()
 
@@ -145,7 +164,7 @@ func getUserFileSize(c *gin.Context) {
 }
 
 func deleteAllUserFiles(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	username := user.GetUsername()
 
@@ -158,12 +177,10 @@ func deleteAllUserFiles(c *gin.Context) {
 }
 
 func getFilesIndex(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	username := user.GetUsername()
-	if err := fs.migrateFromLegacy(username); err != nil {
-		fmt.Printf("\033[91m[-] OFSF Error\033[0m | Migration failed: %v\n", err)
-	}
+	fs.migrateOrLog(username)
 	index, err := fs.GetFilesIndexWithThreshold(username, 50*1024)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -176,19 +193,14 @@ func getFilesIndex(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Length", fmt.Sprintf("%d", len(jsonData)))
-	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Data(http.StatusOK, "application/octet-stream", jsonData)
+	sendOctetStream(c, jsonData)
 }
 
 func getFilesAll(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	username := user.GetUsername()
-	if err := fs.migrateFromLegacy(username); err != nil {
-		fmt.Printf("\033[91m[-] OFSF Error\033[0m | Migration failed: %v\n", err)
-	}
+	fs.migrateOrLog(username)
 	index, err := fs.GetFilesIndexWithThreshold(username, 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -201,14 +213,11 @@ func getFilesAll(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Length", fmt.Sprintf("%d", len(jsonData)))
-	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Data(http.StatusOK, "application/octet-stream", jsonData)
+	sendOctetStream(c, jsonData)
 }
 
 func getFileSizes(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	username := user.GetUsername()
 
 	var req GetFileSizesRequest
@@ -227,7 +236,7 @@ func getFileSizes(c *gin.Context) {
 }
 
 func getFileByUUID(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	uuid := c.Query("uuid")
 	if uuid == "" {
@@ -236,9 +245,7 @@ func getFileByUUID(c *gin.Context) {
 	}
 
 	username := user.GetUsername()
-	if err := fs.migrateFromLegacy(username); err != nil {
-		fmt.Printf("\033[91m[-] OFSF Error\033[0m | Migration failed: %v\n", err)
-	}
+	fs.migrateOrLog(username)
 
 	file, err := fs.GetFileByUUID(username, uuid)
 	if err != nil {
@@ -252,14 +259,11 @@ func getFileByUUID(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Length", fmt.Sprintf("%d", len(jsonData)))
-	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Cache-Control", "no-cache, max-age=0")
-	c.Data(http.StatusOK, "application/octet-stream", jsonData)
+	sendOctetStream(c, jsonData)
 }
 
 func getFileByPath(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	username := user.GetUsername()
 
 	path := c.Param("path")
@@ -298,14 +302,11 @@ func getFileByPath(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Length", fmt.Sprintf("%d", len(data)))
-	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Cache-Control", "no-cache, max-age=0")
-	c.Data(http.StatusOK, "application/octet-stream", data)
+	sendOctetStream(c, data)
 }
 
 func getPathIndex(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	username := user.GetUsername()
 
 	index, err := fs.loadPathIndex(username)
@@ -501,11 +502,9 @@ func (fs *FileSystem) ReadUserFileUnsafe(username Username, fullPath string) str
 
 func (fs *FileSystem) HandleOFSFUpdate(username Username, updates []UpdateChange, maxSize int) UpdateResult {
 
-	fmt.Printf("\033[92m[+] OFSF\033[0m | %s processing %d file updates\n", username, len(updates))
+	ofsfOkf("%s processing %d file updates", username, len(updates))
 
-	if err := fs.migrateFromLegacy(username); err != nil {
-		fmt.Printf("\033[91m[-] OFSF Error\033[0m | Migration failed: %v\n", err)
-	}
+	fs.migrateOrLog(username)
 
 	// Process all updates while holding the lock
 	fs.mu.Lock()
@@ -531,7 +530,7 @@ func (fs *FileSystem) HandleOFSFUpdate(username Username, updates []UpdateChange
 	availableSize := maxSize - usedSize
 
 	if usedSize > maxSize {
-		fmt.Printf("\033[91m[-] OFSF Error\033[0m | User %s exceeded upload storage limit (used: %d, available: %d)\n",
+		ofsfErrorf("User %s exceeded upload storage limit (used: %d, available: %d)",
 			username, usedSize, availableSize)
 		return UpdateResult{
 			Payload:       "Max Upload Size Exceeded",
@@ -540,7 +539,7 @@ func (fs *FileSystem) HandleOFSFUpdate(username Username, updates []UpdateChange
 		}
 	}
 
-	fmt.Printf("\033[92m[+] OFSF\033[0m | Updated %s files (used: %d, available: %d)\n",
+	ofsfOkf("Updated %s files (used: %d, available: %d)",
 		username, usedSize, availableSize)
 
 	return UpdateResult{
@@ -680,7 +679,7 @@ func userIndexPath(username Username) string {
 func (fs *FileSystem) RenameUserFileSystem(oldUsername Username, newUsername Username) {
 	index, err := fs.loadPathIndex(oldUsername)
 	if err != nil {
-		fmt.Printf("\033[91m[-] OFSF Error\033[0m | Failed to load path index: %v\n", err)
+		ofsfErrorf("Failed to load path index: %v", err)
 		return
 	}
 
@@ -709,7 +708,7 @@ func (fs *FileSystem) RenameUserFileSystem(oldUsername Username, newUsername Use
 	oldUserDir := filepath.Join(fileDir, string(oldUsername))
 	newUserDir := filepath.Join(fileDir, string(newUsername))
 	if err := os.Rename(oldUserDir, newUserDir); err != nil {
-		fmt.Printf("\033[91m[-] OFSF Error\033[0m | Failed to rename user directory: %v\n", err)
+		ofsfErrorf("Failed to rename user directory: %v", err)
 	}
 }
 
@@ -743,17 +742,12 @@ func (fs *FileSystem) rebuildPathIndexUnsafe(username Username) (PathIndex, erro
 
 		filePath := filepath.Join(userDir, entry.Name())
 
-		data, err := os.ReadFile(filePath)
+		fileEntry, err := readFileEntry(filePath)
 		if err != nil {
 			continue
 		}
 
-		var meta FileMetadata
-		if err := json.Unmarshal(data, &meta); err != nil || meta.Entry == nil {
-			continue
-		}
-
-		path := entryToPath(meta.Entry, username)
+		path := entryToPath(fileEntry, username)
 		uuid := strings.TrimSuffix(entry.Name(), ".json")
 
 		idx[path] = uuid
@@ -763,7 +757,7 @@ func (fs *FileSystem) rebuildPathIndexUnsafe(username Username) (PathIndex, erro
 		return nil, err
 	}
 
-	fmt.Printf("\033[93m[~] OFSF\033[0m | Rebuilt path index for %s (%d entries)\n",
+	ofsfWarnf("Rebuilt path index for %s (%d entries)",
 		username, len(idx))
 
 	return idx, nil
@@ -791,9 +785,7 @@ func (fs *FileSystem) loadPathIndexUnsafe(username Username) (PathIndex, error) 
 
 // loadPathIndex is the public version that acquires the lock
 func (fs *FileSystem) loadPathIndex(username Username) (PathIndex, error) {
-	if err := fs.migrateFromLegacy(username); err != nil {
-		fmt.Printf("\033[91m[-] OFSF Error\033[0m | Migration failed: %v\n", err)
-	}
+	fs.migrateOrLog(username)
 
 	path := userIndexPath(username)
 
@@ -926,6 +918,12 @@ func (fs *FileSystem) GetUserPath(username Username) string {
 	return filepath.Join(fileDir, string(username))
 }
 
+func (fs *FileSystem) migrateOrLog(username Username) {
+	if err := fs.migrateFromLegacy(username); err != nil {
+		ofsfErrorf("Migration failed: %v", err)
+	}
+}
+
 func (fs *FileSystem) migrateFromLegacy(username Username) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -940,7 +938,7 @@ func (fs *FileSystem) migrateFromLegacy(username Username) error {
 		copyAndReplace(defaultOFSF, legacyPath, "${USERNAME}", string(username))
 	}
 
-	fmt.Printf("\033[93m[~] OFSF\033[0m | Migrating %s from legacy format\n", username)
+	ofsfWarnf("Migrating %s from legacy format", username)
 
 	data, err := os.ReadFile(legacyPath)
 	if err != nil {
@@ -999,9 +997,21 @@ func (fs *FileSystem) migrateFromLegacy(username Username) error {
 	}
 
 	os.Remove(legacyPath)
-	fmt.Printf("\033[92m[+] OFSF\033[0m | Migration complete for %s\n", username)
+	ofsfOkf("Migration complete for %s", username)
 
 	return nil
+}
+
+func readFileEntry(path string) (FileEntry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var metadata FileMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil || metadata.Entry == nil {
+		return nil, fmt.Errorf("invalid file entry")
+	}
+	return metadata.Entry, nil
 }
 
 // getFileByUUIDUnsafe assumes the lock is already held
@@ -1011,26 +1021,18 @@ func (fs *FileSystem) getFileByUUIDUnsafe(username Username, uuid string) (FileE
 	}
 	userDir := fs.GetUserPath(username)
 
-	filePath := filepath.Join(userDir, uuid+".json")
-
-	data, err := os.ReadFile(filePath)
+	entry, err := readFileEntry(filepath.Join(userDir, uuid+".json"))
 	if err != nil {
-		return nil, err
-	}
-
-	var metadata FileMetadata
-	err = json.Unmarshal(data, &metadata)
-	if err != nil || metadata.Entry == nil {
 		return nil, fmt.Errorf("file not found with the provided UUID")
 	}
 
-	if metadata.Entry[0] != ".folder" {
-		switch metadata.Entry[3].(type) {
+	if entry[0] != ".folder" {
+		switch entry[3].(type) {
 		case map[string]any, []any:
-			metadata.Entry[3] = JSONStringify(metadata.Entry[3])
+			entry[3] = JSONStringify(entry[3])
 		}
 	}
-	return metadata.Entry, nil
+	return entry, nil
 }
 
 // GetFileByUUID is the public version that acquires the lock
@@ -1107,9 +1109,7 @@ func (fs *FileSystem) calculateTotalSize(username Username) (int, error) {
 }
 
 func (fs *FileSystem) GetFilesByUUIDs(username Username, uuids []string) (map[string]FileEntry, error) {
-	if err := fs.migrateFromLegacy(username); err != nil {
-		fmt.Printf("\033[91m[-] OFSF Error\033[0m | Migration failed: %v\n", err)
-	}
+	fs.migrateOrLog(username)
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
@@ -1122,14 +1122,8 @@ func (fs *FileSystem) GetFilesByUUIDs(username Username, uuids []string) (map[st
 		}
 		filePath := filepath.Join(userDir, uuid+".json")
 
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			continue
-		}
-
-		var metadata FileMetadata
-		if err := json.Unmarshal(data, &metadata); err == nil && metadata.Entry != nil {
-			result[uuid] = metadata.Entry
+		if entry, err := readFileEntry(filePath); err == nil {
+			result[uuid] = entry
 		}
 	}
 
@@ -1137,9 +1131,7 @@ func (fs *FileSystem) GetFilesByUUIDs(username Username, uuids []string) (map[st
 }
 
 func (fs *FileSystem) DeleteUserFileSystem(username Username) error {
-	if err := fs.migrateFromLegacy(username); err != nil {
-		fmt.Printf("\033[91m[-] OFSF Error\033[0m | Migration failed: %v\n", err)
-	}
+	fs.migrateOrLog(username)
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -1161,9 +1153,7 @@ func (fs *FileSystem) DeleteUserFileSystem(username Username) error {
 }
 
 func (fs *FileSystem) GetUserFileSize(username Username) (string, error) {
-	if err := fs.migrateFromLegacy(username); err != nil {
-		fmt.Printf("\033[91m[-] OFSF Error\033[0m | Migration failed: %v\n", err)
-	}
+	fs.migrateOrLog(username)
 	size, err := fs.calculateTotalSize(username)
 	if err != nil {
 		return "", err

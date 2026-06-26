@@ -53,7 +53,7 @@ var (
 func getOrCreateSalt(user User) string {
 	userId := user.GetId()
 
-	if salt := getStringOrEmpty(user.Get("sys.salt")); salt != "" {
+	if salt := user.GetString("sys.salt"); salt != "" {
 		return salt
 	}
 

@@ -21,8 +21,108 @@ import (
 	"github.com/nfnt/resize"
 )
 
+func requireGroupTag(c *gin.Context) (string, bool) {
+	groupTag := c.Param("grouptag")
+	if groupTag == "" {
+		c.JSON(400, gin.H{"error": "Group tag is required"})
+		return "", false
+	}
+	return groupTag, true
+}
+
+func getGroupOr404(c *gin.Context, groupTag string) (*Group, bool) {
+	group, ok := getGroupByTag(groupTag)
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return nil, false
+	}
+	return group, true
+}
+
+func requireGroupPermOrOwner(c *gin.Context, group *Group, userId UserId, groupTag, perm, errMsg string) bool {
+	if group.OwnerUserId == userId || hasPermission(userId, groupTag, perm) {
+		return true
+	}
+	c.JSON(403, gin.H{"error": errMsg})
+	return false
+}
+
+func requireGroupEditAccess(c *gin.Context, group *Group, userId UserId, groupTag string) bool {
+	if group.OwnerUserId == userId ||
+		hasPermission(userId, groupTag, "groups.group.edit") ||
+		hasPermission(userId, groupTag, "groups.manage") {
+		return true
+	}
+	c.JSON(403, gin.H{"error": "You are not authorized to update this group"})
+	return false
+}
+
+func notifyGroupEvent(targetUserId UserId, sender *User, groupTag, event string, data map[string]any, title, body string) {
+	go func() {
+		targetUser, err := getAccountByUserId(targetUserId)
+		if err != nil {
+			return
+		}
+		addUserEvent(targetUserId, event, data)
+		notifyGroupMember(targetUser, sender, groupTag, title, body)
+	}()
+}
+
+func notifyGroupMember(targetUser User, sender *User, groupTag, title, body string) {
+	if isNotifyAllowed(targetUser, "group_"+groupTag, sender.GetId()) {
+		sendPushNotificationToUser(targetUser, *sender, NotificationRequest{
+			Source: "group_" + groupTag,
+			Title:  title,
+			Body:   body,
+		})
+	}
+}
+
+func findGroupMember(groupTag string, userId UserId) (GroupMember, bool) {
+	for _, m := range getGroupMembers(groupTag) {
+		if m.UserId == userId {
+			return m, true
+		}
+	}
+	return GroupMember{}, false
+}
+
+func isGroupMember(groupTag string, userId UserId) bool {
+	_, ok := findGroupMember(groupTag, userId)
+	return ok
+}
+
+func requireGroupPerm(c *gin.Context, userId UserId, groupTag, perm, errMsg string) bool {
+	if hasPermission(userId, groupTag, perm) {
+		return true
+	}
+	c.JSON(403, gin.H{"error": errMsg})
+	return false
+}
+
+func requireGroupExists(c *gin.Context, groupTag string) bool {
+	if _, ok := getGroupByTag(groupTag); !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return false
+	}
+	return true
+}
+
+func resolveGroup(c *gin.Context) (*Group, string, bool) {
+	groupTag, ok := requireGroupTag(c)
+	if !ok {
+		return nil, "", false
+	}
+	group, ok := getGroupByTag(groupTag)
+	if !ok {
+		c.JSON(404, gin.H{"error": "Group not found"})
+		return nil, "", false
+	}
+	return group, groupTag, true
+}
+
 func getMyGroups(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	id := user.GetId()
 
@@ -46,15 +146,13 @@ func getMyGroups(c *gin.Context) {
 }
 
 func createGroup(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	tag := c.Query("tag")
-	if tag == "" {
-		c.JSON(400, gin.H{"error": "Tag is required"})
+	if !requireField(c, tag, "Tag is required") {
 		return
 	}
-	if len(tag) > 10 {
-		c.JSON(400, gin.H{"error": "Tag must be 10 characters or less"})
+	if !requireMaxLen(c, tag, 10, "Tag must be 10 characters or less") {
 		return
 	}
 	re := regexp.MustCompile(`^[a-zA-Z0-9]+$`)
@@ -64,29 +162,24 @@ func createGroup(c *gin.Context) {
 	}
 
 	name := c.Query("name")
-	if name == "" {
-		c.JSON(400, gin.H{"error": "Name is required"})
+	if !requireField(c, name, "Name is required") {
 		return
 	}
-	if len(name) > 50 {
-		c.JSON(400, gin.H{"error": "Name length exceeded"})
+	if !requireMaxLen(c, name, 50, "Name length exceeded") {
 		return
 	}
 	description := c.Query("description")
-	if len(description) > 500 {
-		c.JSON(400, gin.H{"error": "Description length exceeded"})
+	if !requireMaxLen(c, description, 500, "Description length exceeded") {
 		return
 	}
 
 	readme := c.Query("readme")
-	if len(readme) > 10000 {
-		c.JSON(400, gin.H{"error": "Readme length exceeded"})
+	if !requireMaxLen(c, readme, 10000, "Readme length exceeded") {
 		return
 	}
 
 	rules := c.Query("rules")
-	if len(rules) > 5000 {
-		c.JSON(400, gin.H{"error": "Rules length exceeded"})
+	if !requireMaxLen(c, rules, 5000, "Rules length exceeded") {
 		return
 	}
 
@@ -212,14 +305,12 @@ func createGroup(c *gin.Context) {
 	groupsData[tag] = &newGroupData
 	groupsDataMutex.Unlock()
 
-	user.SetBalance(roundVal(userCredits - 50))
-	user.addTransaction(Transaction{
+	user.applyTransaction(roundVal(userCredits-50), Transaction{
 		Note:      "Group creation fee for " + tag,
 		User:      UserId(""),
 		Amount:    50,
 		Type:      "group_create",
 		Timestamp: time.Now().UnixMilli(),
-		NewTotal:  roundVal(userCredits - 50),
 	})
 	go saveUsers()
 	go saveGroupData(tag)
@@ -258,18 +349,10 @@ func searchGroups(c *gin.Context) {
 }
 
 func joinGroup(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
-	groupTag := c.Param("grouptag")
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	group, ok := getGroupByTag(groupTag)
-
+	group, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
@@ -339,14 +422,12 @@ func joinGroup(c *gin.Context) {
 			c.JSON(400, gin.H{"error": "Insufficient funds to join this group", "required": group.EntryFee, "available": userCredits})
 			return
 		}
-		user.SetBalance(roundVal(userCredits - group.EntryFee))
-		user.addTransaction(Transaction{
+		user.applyTransaction(roundVal(userCredits-group.EntryFee), Transaction{
 			Note:      "Entry fee for group " + groupTag,
 			User:      UserId(""),
 			Amount:    group.EntryFee,
 			Type:      "group_entry_fee",
 			Timestamp: time.Now().UnixMilli(),
-			NewTotal:  roundVal(userCredits - group.EntryFee),
 		})
 		groupsDataMutex.Lock()
 		data := groupsData[groupTag]
@@ -377,18 +458,10 @@ func joinGroup(c *gin.Context) {
 }
 
 func leaveGroup(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
-	groupTag := c.Param("grouptag")
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	group, ok := getGroupByTag(groupTag)
-
+	group, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
@@ -421,16 +494,8 @@ func leaveGroup(c *gin.Context) {
 }
 
 func getGroup(c *gin.Context) {
-	groupTag := c.Param("grouptag")
-
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	_, ok := getGroupByTag(groupTag)
+	_, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
@@ -447,11 +512,10 @@ func getGroup(c *gin.Context) {
 }
 
 func updateGroup(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
-	groupTag := c.Param("grouptag")
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
+	groupTag, ok := requireGroupTag(c)
+	if !ok {
 		return
 	}
 
@@ -460,18 +524,13 @@ func updateGroup(c *gin.Context) {
 		return
 	}
 
-	_, ok := getGroupByTag(groupTag)
-
+	group, ok := getGroupByTag(groupTag)
 	if !ok {
 		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	group, _ := getGroupByTag(groupTag)
-	if group.OwnerUserId != user.GetId() &&
-		!hasPermission(user.GetId(), groupTag, "groups.group.edit") &&
-		!hasPermission(user.GetId(), groupTag, "groups.manage") {
-		c.JSON(403, gin.H{"error": "You are not authorized to update this group"})
+	if !requireGroupEditAccess(c, group, user.GetId(), groupTag) {
 		return
 	}
 
@@ -482,12 +541,10 @@ func updateGroup(c *gin.Context) {
 
 	if name, ok := jsonBody["name"].(string); ok {
 		name = strings.TrimSpace(name)
-		if name == "" {
-			c.JSON(400, gin.H{"error": "Name cannot be empty"})
+		if !requireField(c, name, "Name cannot be empty") {
 			return
 		}
-		if len(name) > 50 {
-			c.JSON(400, gin.H{"error": "Name length exceeded"})
+		if !requireMaxLen(c, name, 50, "Name length exceeded") {
 			return
 		}
 		data.Group.Name = name
@@ -496,15 +553,13 @@ func updateGroup(c *gin.Context) {
 		data.Group.Description = description
 	}
 	if readme, ok := jsonBody["readme"].(string); ok {
-		if len(readme) > 10000 {
-			c.JSON(400, gin.H{"error": "Readme length exceeded"})
+		if !requireMaxLen(c, readme, 10000, "Readme length exceeded") {
 			return
 		}
 		data.Group.Readme = readme
 	}
 	if rules, ok := jsonBody["rules"].(string); ok {
-		if len(rules) > 5000 {
-			c.JSON(400, gin.H{"error": "Rules length exceeded"})
+		if !requireMaxLen(c, rules, 5000, "Rules length exceeded") {
 			return
 		}
 		data.Group.Rules = rules
@@ -540,12 +595,10 @@ func updateGroup(c *gin.Context) {
 
 	if newTag, ok := jsonBody["tag"].(string); ok {
 		newTag = strings.TrimSpace(newTag)
-		if newTag == "" {
-			c.JSON(400, gin.H{"error": "Tag cannot be empty"})
+		if !requireField(c, newTag, "Tag cannot be empty") {
 			return
 		}
-		if len(newTag) > 10 {
-			c.JSON(400, gin.H{"error": "Tag must be 10 characters or less"})
+		if !requireMaxLen(c, newTag, 10, "Tag must be 10 characters or less") {
 			return
 		}
 		re := regexp.MustCompile(`^[a-zA-Z0-9]+$`)
@@ -603,18 +656,10 @@ func updateGroup(c *gin.Context) {
 }
 
 func deleteGroup(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
-	groupTag := c.Param("grouptag")
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	group, ok := getGroupByTag(groupTag)
-
+	group, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
@@ -633,31 +678,14 @@ func deleteGroup(c *gin.Context) {
 }
 
 func representGroup(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
-	groupTag := c.Param("grouptag")
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	_, ok := getGroupByTag(groupTag)
-
+	_, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	members := getGroupMembers(groupTag)
-	isMember := false
-	for _, member := range members {
-		if member.UserId == user.GetId() {
-			isMember = true
-			break
-		}
-	}
-
-	if !isMember {
+	if !isGroupMember(groupTag, user.GetId()) {
 		c.JSON(400, gin.H{"error": "You are not a member of this group"})
 		return
 	}
@@ -671,7 +699,7 @@ func representGroup(c *gin.Context) {
 }
 
 func disrepresentGroup(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	user.DelKey("sys.group")
 	go saveUsers()
@@ -681,18 +709,10 @@ func disrepresentGroup(c *gin.Context) {
 }
 
 func reportGroup(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
-	groupTag := c.Param("grouptag")
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	group, ok := getGroupByTag(groupTag)
-
+	group, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
@@ -704,23 +724,22 @@ func reportGroup(c *gin.Context) {
 }
 
 func hasPermission(userId UserId, groupTag string, permission string) bool {
-	members := getGroupMembers(groupTag)
-
-	for _, member := range members {
-		if member.UserId == userId {
-			rolesMap := getGroupRolesMap(groupTag)
-			for _, roleId := range member.RoleIds {
-				role, roleExists := rolesMap[roleId]
-				if roleExists {
-					if role.Name == "Owner" {
-						return true
-					}
-					for _, perm := range role.Permissions {
-						if perm == permission {
-							return true
-						}
-					}
-				}
+	member, ok := findGroupMember(groupTag, userId)
+	if !ok {
+		return false
+	}
+	rolesMap := getGroupRolesMap(groupTag)
+	for _, roleId := range member.RoleIds {
+		role, roleExists := rolesMap[roleId]
+		if !roleExists {
+			continue
+		}
+		if role.Name == "Owner" {
+			return true
+		}
+		for _, perm := range role.Permissions {
+			if perm == permission {
+				return true
 			}
 		}
 	}
@@ -728,30 +747,16 @@ func hasPermission(userId UserId, groupTag string, permission string) bool {
 }
 
 func getGroupMembersList(c *gin.Context) {
-	user := c.MustGet("user").(*User)
-	groupTag := c.Param("grouptag")
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	_, ok := getGroupByTag(groupTag)
+	user := currentUser(c)
+	_, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
 	// Check authorization: owner or member with groups.members.view permission
 	userId := user.GetId()
-	members := getGroupMembers(groupTag)
-	var callerMember *GroupMember
-	for i := range members {
-		if members[i].UserId == userId {
-			callerMember = &members[i]
-			break
-		}
-	}
-	if callerMember == nil {
+	callerMember, isMember := findGroupMember(groupTag, userId)
+	if !isMember {
 		c.JSON(403, gin.H{"error": "You don't have permission to view this group's members"})
 		return
 	}
@@ -763,6 +768,7 @@ func getGroupMembersList(c *gin.Context) {
 	// Optional search filter: filter by username or user ID
 	searchQuery := strings.ToLower(strings.TrimSpace(c.Query("search")))
 
+	members := getGroupMembers(groupTag)
 	filteredMembers := members
 	if searchQuery != "" {
 		filteredMembers = make([]GroupMember, 0)
@@ -860,21 +866,12 @@ func getTopGroups(c *gin.Context) {
 }
 
 func uploadGroupIcon(c *gin.Context) {
-	user := c.MustGet("user").(*User)
-	groupTag := c.Param("grouptag")
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-	group, ok := getGroupByTag(groupTag)
+	user := currentUser(c)
+	group, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
-	if group.OwnerUserId != user.GetId() &&
-		!hasPermission(user.GetId(), groupTag, "groups.group.edit") &&
-		!hasPermission(user.GetId(), groupTag, "groups.manage") {
-		c.JSON(403, gin.H{"error": "You are not authorized to update this group"})
+	if !requireGroupEditAccess(c, group, user.GetId(), groupTag) {
 		return
 	}
 	file, header, err := c.Request.FormFile("icon")
@@ -896,13 +893,6 @@ func uploadGroupIcon(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Invalid image format"})
 		return
 	}
-	img, _, err := image.Decode(bytes.NewReader(imageData))
-	if err != nil {
-		c.JSON(400, gin.H{"error": "Invalid image format"})
-		return
-	}
-	// Resize to 256x256
-	resized := resize.Resize(256, 256, img, resize.Lanczos3)
 	dirPath := groupDirPath(groupTag)
 	os.MkdirAll(dirPath, 0755)
 	// Remove old icons
@@ -910,13 +900,7 @@ func uploadGroupIcon(c *gin.Context) {
 		os.Remove(filepath.Join(dirPath, "icon"+ext))
 	}
 	iconPath := filepath.Join(dirPath, "icon.jpg")
-	out, err := os.Create(iconPath)
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to save icon"})
-		return
-	}
-	defer out.Close()
-	if err := jpeg.Encode(out, resized, &jpeg.Options{Quality: 85}); err != nil {
+	if err := writeResizedJPEG(imageData, 256, 256, iconPath); err != nil {
 		c.JSON(500, gin.H{"error": "Failed to encode icon"})
 		return
 	}
@@ -941,21 +925,12 @@ func getGroupIcon(c *gin.Context) {
 }
 
 func uploadGroupBanner(c *gin.Context) {
-	user := c.MustGet("user").(*User)
-	groupTag := c.Param("grouptag")
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-	group, ok := getGroupByTag(groupTag)
+	user := currentUser(c)
+	group, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
-	if group.OwnerUserId != user.GetId() &&
-		!hasPermission(user.GetId(), groupTag, "groups.group.edit") &&
-		!hasPermission(user.GetId(), groupTag, "groups.manage") {
-		c.JSON(403, gin.H{"error": "You are not authorized to update this group"})
+	if !requireGroupEditAccess(c, group, user.GetId(), groupTag) {
 		return
 	}
 

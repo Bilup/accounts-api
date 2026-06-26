@@ -64,12 +64,7 @@ var (
 func loadReports() {
 	reportsMutex.Lock()
 	defer reportsMutex.Unlock()
-	if data, err := os.ReadFile(reportsFilePath); err == nil {
-		_ = json.Unmarshal(data, &reports)
-	}
-	if reports == nil {
-		reports = []Report{}
-	}
+	reports = loadJSONOrDefault(reportsFilePath, []Report{})
 }
 
 func saveReports() {
@@ -120,7 +115,7 @@ func reportToNet(r Report) ReportNet {
 }
 
 func submitReport(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	type Request struct {
 		TargetType string `json:"target_type"`
@@ -136,16 +131,13 @@ func submitReport(c *gin.Context) {
 	req.TargetID = strings.TrimSpace(req.TargetID)
 	req.Reason = strings.TrimSpace(req.Reason)
 
-	if req.TargetID == "" {
-		c.JSON(400, gin.H{"error": "target_id is required"})
+	if !requireField(c, req.TargetID, "target_id is required") {
 		return
 	}
-	if req.Reason == "" {
-		c.JSON(400, gin.H{"error": "reason is required"})
+	if !requireField(c, req.Reason, "reason is required") {
 		return
 	}
-	if len(req.Reason) > 1000 {
-		c.JSON(400, gin.H{"error": "reason is too long"})
+	if !requireMaxLen(c, req.Reason, 1000, "reason is too long") {
 		return
 	}
 
@@ -239,7 +231,7 @@ func modListReports(c *gin.Context) {
 }
 
 func modResolveReport(c *gin.Context) {
-	mod := c.MustGet("user").(*User)
+	mod := currentUser(c)
 
 	type Request struct {
 		ID     string `json:"id"`
@@ -287,16 +279,8 @@ func modResolveReport(c *gin.Context) {
 }
 
 func resolveModTarget(c *gin.Context, mod *User, username string) (User, bool) {
-	userId := getIdByUsername(Username(username))
-	if userId == "" {
-		c.JSON(404, gin.H{"error": "user not found"})
-		return nil, false
-	}
-	usersMutex.RLock()
-	target := getUserById(userId)
-	usersMutex.RUnlock()
-	if len(target) == 0 {
-		c.JSON(404, gin.H{"error": "user not found"})
+	target, ok := resolveUserByName(c, username)
+	if !ok {
 		return nil, false
 	}
 	if target.GetId() == mod.GetId() {
@@ -311,7 +295,7 @@ func resolveModTarget(c *gin.Context, mod *User, username string) (User, bool) {
 }
 
 func modSetStanding(c *gin.Context) {
-	mod := c.MustGet("user").(*User)
+	mod := currentUser(c)
 
 	type Request struct {
 		Username string        `json:"username"`
@@ -322,8 +306,7 @@ func modSetStanding(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if req.Level == "" {
-		c.JSON(400, gin.H{"error": "standing level is required"})
+	if !requireField(c, req.Level, "standing level is required") {
 		return
 	}
 	switch req.Level {
@@ -332,8 +315,7 @@ func modSetStanding(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid standing level"})
 		return
 	}
-	if req.Reason == "" {
-		c.JSON(400, gin.H{"error": "reason is required"})
+	if !requireField(c, req.Reason, "reason is required") {
 		return
 	}
 
@@ -353,7 +335,7 @@ func modSetStanding(c *gin.Context) {
 }
 
 func modRecoverStanding(c *gin.Context) {
-	mod := c.MustGet("user").(*User)
+	mod := currentUser(c)
 
 	type Request struct {
 		Username string `json:"username"`
@@ -363,8 +345,7 @@ func modRecoverStanding(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if req.Reason == "" {
-		c.JSON(400, gin.H{"error": "reason is required"})
+	if !requireField(c, req.Reason, "reason is required") {
 		return
 	}
 
@@ -379,18 +360,7 @@ func modRecoverStanding(c *gin.Context) {
 		return
 	}
 
-	var newLevel StandingLevel
-	switch current {
-	case StandingSuspended:
-		newLevel = StandingWarning
-	case StandingWarning:
-		newLevel = StandingGood
-	case StandingBanned:
-		newLevel = StandingWarning
-	default:
-		newLevel = StandingGood
-	}
-
+	newLevel := nextRecoveryLevel(current)
 	target.SetStanding(newLevel, req.Reason, mod.GetId())
 	go saveUsers()
 
@@ -410,21 +380,12 @@ func modGetStandingHistory(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if req.Username == "" {
-		c.JSON(400, gin.H{"error": "username is required"})
+	if !requireField(c, req.Username, "username is required") {
 		return
 	}
 
-	userId := getIdByUsername(Username(req.Username))
-	if userId == "" {
-		c.JSON(404, gin.H{"error": "user not found"})
-		return
-	}
-	usersMutex.RLock()
-	user := getUserById(userId)
-	usersMutex.RUnlock()
-	if len(user) == 0 {
-		c.JSON(404, gin.H{"error": "user not found"})
+	user, ok := resolveUserByName(c, req.Username)
+	if !ok {
 		return
 	}
 
@@ -445,21 +406,12 @@ func modSetModerator(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if req.Username == "" {
-		c.JSON(400, gin.H{"error": "username is required"})
+	if !requireField(c, req.Username, "username is required") {
 		return
 	}
 
-	userId := getIdByUsername(Username(req.Username))
-	if userId == "" {
-		c.JSON(404, gin.H{"error": "user not found"})
-		return
-	}
-	usersMutex.RLock()
-	user := getUserById(userId)
-	usersMutex.RUnlock()
-	if len(user) == 0 {
-		c.JSON(404, gin.H{"error": "user not found"})
+	user, ok := resolveUserByName(c, req.Username)
+	if !ok {
 		return
 	}
 	if user.IsNetworkAdmin() {
@@ -514,21 +466,12 @@ func setModeratorAdmin(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if req.Username == "" {
-		c.JSON(400, gin.H{"error": "username is required"})
+	if !requireField(c, req.Username, "username is required") {
 		return
 	}
 
-	userId := getIdByUsername(Username(req.Username))
-	if userId == "" {
-		c.JSON(404, gin.H{"error": "user not found"})
-		return
-	}
-	usersMutex.RLock()
-	user := getUserById(userId)
-	usersMutex.RUnlock()
-	if len(user) == 0 {
-		c.JSON(404, gin.H{"error": "user not found"})
+	user, ok := resolveUserByName(c, req.Username)
+	if !ok {
 		return
 	}
 

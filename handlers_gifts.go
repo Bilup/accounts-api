@@ -15,7 +15,7 @@ const (
 )
 
 func createGift(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	var req struct {
 		Amount       float64 `json:"amount"`
@@ -74,15 +74,12 @@ func createGift(c *gin.Context) {
 	}
 
 	newBal := roundVal(userCredits - totalDeduction)
-	user.SetBalance(newBal)
-
-	user.addTransaction(Transaction{
+	user.applyTransaction(newBal, Transaction{
 		Note:      note,
 		User:      UserId(""),
 		Amount:    totalDeduction,
 		Type:      "gift_create",
 		Timestamp: now,
-		NewTotal:  newBal,
 		GiftId:    giftId,
 		GiftCode:  giftCode,
 	})
@@ -108,8 +105,7 @@ func createGift(c *gin.Context) {
 
 func getGift(c *gin.Context) {
 	code := c.Param("code")
-	if code == "" {
-		c.JSON(400, gin.H{"error": "Gift code is required"})
+	if !requireField(c, code, "Gift code is required") {
 		return
 	}
 
@@ -138,11 +134,10 @@ func getGift(c *gin.Context) {
 }
 
 func claimGift(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	code := c.Param("code")
-	if code == "" {
-		c.JSON(400, gin.H{"error": "Gift code is required"})
+	if !requireField(c, code, "Gift code is required") {
 		return
 	}
 
@@ -192,15 +187,12 @@ func claimGift(c *gin.Context) {
 
 	userCredits := user.GetCredits()
 	newBal := roundVal(userCredits + gift.Amount)
-	user.SetBalance(newBal)
-
-	user.addTransaction(Transaction{
+	user.applyTransaction(newBal, Transaction{
 		Note:      gift.Note,
 		User:      gift.CreatorId,
 		Amount:    gift.Amount,
 		Type:      "gift_claim",
 		Timestamp: now,
-		NewTotal:  newBal,
 		GiftId:    gift.Id,
 		GiftCode:  gift.Code,
 	})
@@ -229,11 +221,10 @@ func claimGift(c *gin.Context) {
 	})
 }
 func cancelGift(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	giftId := c.Param("id")
-	if giftId == "" {
-		c.JSON(400, gin.H{"error": "Gift ID is required"})
+	if !requireField(c, giftId, "Gift ID is required") {
 		return
 	}
 
@@ -281,15 +272,12 @@ func cancelGift(c *gin.Context) {
 
 	userCredits := user.GetCredits()
 	newBal := roundVal(userCredits + gift.Amount)
-	user.SetBalance(newBal)
-
-	user.addTransaction(Transaction{
+	user.applyTransaction(newBal, Transaction{
 		Note:      "Gift cancelled: " + gift.Code,
 		User:      UserId(""),
 		Amount:    gift.Amount,
 		Type:      "gift_refund",
 		Timestamp: now,
-		NewTotal:  newBal,
 		GiftId:    gift.Id,
 		GiftCode:  gift.Code,
 	})
@@ -304,7 +292,7 @@ func cancelGift(c *gin.Context) {
 	})
 }
 func getMyGifts(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	creatorGifts := getGiftsByCreator(user.GetId())
 

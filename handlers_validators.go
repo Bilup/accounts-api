@@ -67,10 +67,9 @@ func StartValidatorCleanup() {
 
 func generateValidator(c *gin.Context) {
 	authKey := extractAuthKey(c)
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	key := c.Query("key")
-	if key == "" {
-		c.JSON(400, gin.H{"error": "key is required"})
+	if !requireField(c, key, "key is required") {
 		return
 	}
 
@@ -97,14 +96,12 @@ func generateValidator(c *gin.Context) {
 
 func validateToken(c *gin.Context) {
 	validator := strings.TrimSpace(c.Query("v"))
-	if validator == "" {
-		c.JSON(400, gin.H{"error": "Validator is required"})
+	if !requireField(c, validator, "Validator is required") {
 		return
 	}
 
 	key := c.Query("key")
-	if key == "" {
-		c.JSON(400, gin.H{"error": "Key is required"})
+	if !requireField(c, key, "Key is required") {
 		return
 	}
 
@@ -126,8 +123,7 @@ func validateToken(c *gin.Context) {
 	}
 
 	userKey := foundUser.GetKey()
-	if userKey == "" {
-		c.JSON(400, gin.H{"error": "User has no token"})
+	if !requireField(c, userKey, "User has no token") {
 		return
 	}
 

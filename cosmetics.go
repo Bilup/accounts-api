@@ -1,11 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -151,25 +149,7 @@ func validateCosmeticType(ct CosmeticType) bool {
 func loadCosmeticsCatalog() {
 	cosmeticsCatalogMu.Lock()
 	defer cosmeticsCatalogMu.Unlock()
-
-	if _, err := os.Stat(COSMETICS_FILE_PATH); os.IsNotExist(err) {
-		cosmeticsCatalog = []CosmeticCatalogEntry{}
-		return
-	}
-
-	data, err := os.ReadFile(COSMETICS_FILE_PATH)
-	if err != nil {
-		log.Printf("Error reading cosmetics catalog: %v", err)
-		cosmeticsCatalog = []CosmeticCatalogEntry{}
-		return
-	}
-
-	if err := json.Unmarshal(data, &cosmeticsCatalog); err != nil {
-		log.Printf("Error unmarshaling cosmetics catalog: %v", err)
-		cosmeticsCatalog = []CosmeticCatalogEntry{}
-		return
-	}
-
+	cosmeticsCatalog = loadJSONOrDefault(COSMETICS_FILE_PATH, []CosmeticCatalogEntry{})
 	log.Printf("Loaded %d cosmetics catalog entries", len(cosmeticsCatalog))
 }
 
@@ -201,6 +181,44 @@ func getCatalogEntryById(id string) (*CosmeticCatalogEntry, bool) {
 		}
 	}
 	return nil, false
+}
+
+func payCosmeticShares(buyerId, creatorId UserId, entryName string, creatorShare, platformShare float64, gift bool, now int64) {
+	label := ""
+	if gift {
+		label = "gift "
+	}
+	if creatorUser := getUserById(creatorId); len(creatorUser) > 0 {
+		newBal := roundVal(creatorUser.GetCredits() + creatorShare)
+		creatorUser.applyTransaction(newBal, Transaction{
+			Note:      "Cosmetic " + label + "sale: " + entryName,
+			User:      buyerId,
+			Amount:    creatorShare,
+			Type:      "cosmetic_sale",
+			Timestamp: now,
+		})
+	}
+	if platformShare > 0 {
+		if mistUser, err := getAccountByUsername(Username("mist")); err == nil && len(mistUser) > 0 {
+			newBal := roundVal(mistUser.GetCredits() + platformShare)
+			mistUser.applyTransaction(newBal, Transaction{
+				Note:      "Cosmetic " + label + "platform cut: " + entryName,
+				User:      buyerId,
+				Amount:    platformShare,
+				Type:      "cosmetic_platform",
+				Timestamp: now,
+			})
+		}
+	}
+}
+
+func loadUserCosmeticsOr500(c *gin.Context, userId UserId) (*UserCosmetics, bool) {
+	uc, err := loadUserCosmetics(userId)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to load cosmetics data"})
+		return nil, false
+	}
+	return uc, true
 }
 
 func getCatalogEntrySnapshot(id string) (*CosmeticCatalogEntry, bool) {
@@ -346,7 +364,7 @@ func getCosmeticDetail(c *gin.Context) {
 }
 
 func getMyCosmetics(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	userId := user.GetId()
 
 	uc, err := loadUserCosmetics(userId)
@@ -384,7 +402,7 @@ func getMyCosmetics(c *gin.Context) {
 }
 
 func purchaseCosmetic(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	userId := user.GetId()
 	id := c.Param("id")
 
@@ -408,9 +426,8 @@ func purchaseCosmetic(c *gin.Context) {
 		return
 	}
 
-	uc, err := loadUserCosmetics(userId)
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to load cosmetics data"})
+	uc, ok := loadUserCosmeticsOr500(c, userId)
+	if !ok {
 		return
 	}
 
@@ -467,48 +484,16 @@ func purchaseCosmetic(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Insufficient credits"})
 		return
 	}
-	user.SetBalance(newPurchaserBal)
 	now := time.Now().UnixMilli()
-	user.addTransaction(Transaction{
+	user.applyTransaction(newPurchaserBal, Transaction{
 		Note:      "Cosmetic purchase: " + entry.Name,
 		User:      entry.CreatorId,
 		Amount:    effectivePrice,
 		Type:      "cosmetic_purchase",
 		Timestamp: now,
-		NewTotal:  newPurchaserBal,
 	})
 
-	creatorUser := getUserById(entry.CreatorId)
-	if len(creatorUser) > 0 {
-		creatorBal := creatorUser.GetCredits()
-		newCreatorBal := roundVal(creatorBal + creatorShare)
-		creatorUser.SetBalance(newCreatorBal)
-		creatorUser.addTransaction(Transaction{
-			Note:      "Cosmetic sale: " + entry.Name,
-			User:      user.GetId(),
-			Amount:    creatorShare,
-			Type:      "cosmetic_sale",
-			Timestamp: now,
-			NewTotal:  newCreatorBal,
-		})
-	}
-
-	mistUser, mistErr := getAccountByUsername(Username("mist"))
-	if mistErr == nil && len(mistUser) > 0 {
-		mistBal := mistUser.GetCredits()
-		newMistBal := roundVal(mistBal + platformShare)
-		mistUser.SetBalance(newMistBal)
-		if platformShare > 0 {
-			mistUser.addTransaction(Transaction{
-				Note:      "Cosmetic platform cut: " + entry.Name,
-				User:      user.GetId(),
-				Amount:    platformShare,
-				Type:      "cosmetic_platform",
-				Timestamp: now,
-				NewTotal:  newMistBal,
-			})
-		}
-	}
+	payCosmeticShares(user.GetId(), entry.CreatorId, entry.Name, creatorShare, platformShare, false, now)
 
 	entry.Purchases++
 	incrementCosmeticPurchases(id)
@@ -534,7 +519,7 @@ func purchaseCosmetic(c *gin.Context) {
 }
 
 func equipCosmetic(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	userId := user.GetId()
 	id := c.Param("id")
 
@@ -553,21 +538,12 @@ func equipCosmetic(c *gin.Context) {
 	userCosmeticsMu.Lock()
 	defer userCosmeticsMu.Unlock()
 
-	uc, err := loadUserCosmetics(userId)
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to load cosmetics data"})
+	uc, ok := loadUserCosmeticsOr500(c, userId)
+	if !ok {
 		return
 	}
 
-	owned := false
-	for _, ownedId := range uc.OwnedCosmetics {
-		if ownedId == id {
-			owned = true
-			break
-		}
-	}
-
-	if !owned {
+	if !slices.Contains(uc.OwnedCosmetics, id) {
 		c.JSON(403, gin.H{"error": "You do not own this cosmetic"})
 		return
 	}
@@ -589,12 +565,11 @@ func equipCosmetic(c *gin.Context) {
 }
 
 func unequipCosmetic(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	userId := user.GetId()
 
 	cosmeticType := c.Query("type")
-	if cosmeticType == "" {
-		c.JSON(400, gin.H{"error": "type query parameter is required (e.g. overlay)"})
+	if !requireField(c, cosmeticType, "type query parameter is required (e.g. overlay)") {
 		return
 	}
 
@@ -607,9 +582,8 @@ func unequipCosmetic(c *gin.Context) {
 	userCosmeticsMu.Lock()
 	defer userCosmeticsMu.Unlock()
 
-	uc, err := loadUserCosmetics(userId)
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to load cosmetics data"})
+	uc, ok := loadUserCosmeticsOr500(c, userId)
+	if !ok {
 		return
 	}
 
@@ -658,8 +632,7 @@ func adminCreateCosmetic(c *gin.Context) {
 	}
 
 	req.Id = sanitizeCosmeticId(req.Id)
-	if req.Id == "" {
-		c.JSON(400, gin.H{"error": "Cosmetic id is required"})
+	if !requireField(c, req.Id, "Cosmetic id is required") {
 		return
 	}
 
@@ -671,13 +644,11 @@ func adminCreateCosmetic(c *gin.Context) {
 	}
 
 	req.Name = sanitizeCosmeticField(req.Name, maxCosmeticNameLen)
-	if req.Name == "" {
-		c.JSON(400, gin.H{"error": "Name is required"})
+	if !requireField(c, req.Name, "Name is required") {
 		return
 	}
 
-	if req.CosmeticType == "" {
-		c.JSON(400, gin.H{"error": "cosmetic_type is required"})
+	if !requireField(c, req.CosmeticType, "cosmetic_type is required") {
 		return
 	}
 
@@ -711,8 +682,7 @@ func adminCreateCosmetic(c *gin.Context) {
 	req.Price = math.Round(req.Price*100) / 100
 
 	req.Creator = strings.TrimSpace(req.Creator)
-	if req.Creator == "" {
-		c.JSON(400, gin.H{"error": "Creator username is required"})
+	if !requireField(c, req.Creator, "Creator username is required") {
 		return
 	}
 

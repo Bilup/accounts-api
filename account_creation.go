@@ -71,7 +71,7 @@ func createAccount(in AccountCreateInput) (User, error) {
 
 	newUser := User{
 		"username":         in.Username,
-		"pfp":              "https://avatars.rotur.dev/" + usernameLower,
+		"pfp":              avatarURL(usernameLower),
 		"password":         "",
 		"email":            in.Email,
 		"key":              generateAccountToken(),

@@ -83,6 +83,22 @@ func getAccountByUserId[T UserId | string](id T) (User, error) {
 	return nil, fmt.Errorf("account not found for id=%q", id)
 }
 
+func resolveUserByName(c *gin.Context, username string) (User, bool) {
+	userId := getIdByUsername(Username(username))
+	if userId == "" {
+		c.JSON(404, gin.H{"error": "user not found"})
+		return nil, false
+	}
+	usersMutex.RLock()
+	user := getUserById(userId)
+	usersMutex.RUnlock()
+	if len(user) == 0 {
+		c.JSON(404, gin.H{"error": "user not found"})
+		return nil, false
+	}
+	return user, true
+}
+
 func getAccountByUsername[T Username | string](username T) (User, error) {
 	name := Username(username).ToLower()
 	idToUserMutex.RLock()
@@ -173,8 +189,7 @@ func getUserBy(c *gin.Context) {
 	}
 
 	key := c.Query("key")
-	if key == "" {
-		c.JSON(400, gin.H{"error": "Key is required"})
+	if !requireField(c, key, "Key is required") {
 		return
 	}
 
@@ -186,8 +201,7 @@ func getUserBy(c *gin.Context) {
 		_ = c.ShouldBindJSON(&body)
 		value = body.Value
 	}
-	if value == "" {
-		c.JSON(400, gin.H{"error": "Value is required"})
+	if !requireField(c, value, "Value is required") {
 		return
 	}
 
@@ -343,7 +357,7 @@ func userToNet(user User) User {
 	userCopy["sys.transactions"] = netTransactions
 
 	if userCopy["sys.banner"] != nil || userCopy["banner"] != nil {
-		userCopy["banner"] = "https://avatars.rotur.dev/.banners/" + string(user.GetUsername())
+		userCopy["banner"] = bannerURL(string(user.GetUsername()))
 	}
 
 	return userCopy
@@ -370,7 +384,7 @@ func userToProfileOnly(user User, subTokenValue string) map[string]any {
 	sub := user.GetSubscription().Tier
 	calculatedBadges := calculateUserBadges(user)
 	st := hub.getUserStatus(user.GetId())
-	bio := getStringOrEmpty(user.Get("bio"))
+	bio := user.GetString("bio")
 	benefits := user.GetSubscriptionBenefits()
 	if len(bio) > benefits.Bio_Length {
 		bio = bio[:benefits.Bio_Length]
@@ -378,13 +392,13 @@ func userToProfileOnly(user User, subTokenValue string) map[string]any {
 	profileData := map[string]any{
 		"key":          subTokenValue,
 		"username":     username,
-		"pfp":          "https://avatars.rotur.dev/" + string(username),
+		"pfp":          avatarURL(string(username)),
 		"sys.banned":   user.IsBanned(),
 		"private":      user.IsPrivate(),
 		"bio":          bio,
 		"followers":    followerCount,
 		"following":    followingCount,
-		"pronouns":     getStringOrEmpty(user.Get("pronouns")),
+		"pronouns":     user.GetString("pronouns"),
 		"system":       user.GetSystem(),
 		"created":      user.GetCreated(),
 		"badges":       calculatedBadges,
@@ -396,7 +410,7 @@ func userToProfileOnly(user User, subTokenValue string) map[string]any {
 		"id":           userId,
 	}
 	if user.Get("sys.banner") != nil || user.Get("banner") != nil {
-		profileData["banner"] = "https://avatars.rotur.dev/.banners/" + string(username)
+		profileData["banner"] = bannerURL(string(username))
 	}
 	// Resolve group tag
 	if gid, ok := user["sys.group"]; ok {
@@ -415,7 +429,7 @@ func userToProfileOnly(user User, subTokenValue string) map[string]any {
 }
 
 func checkAuth(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	tokenType := c.GetString("token_type")
 
 	resp := gin.H{
@@ -478,7 +492,7 @@ func generateAccountToken() string {
 }
 
 func refreshToken(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	newToken := generateAccountToken()
 
@@ -540,8 +554,7 @@ func registerUser(c *gin.Context) {
 	email := req.Email
 	system := req.System
 
-	if username == "" || password == "" {
-		c.JSON(400, gin.H{"error": "Username and password are required"})
+	if !requireFields(c, "Username and password are required", string(username), password) {
 		return
 	}
 
@@ -700,8 +713,7 @@ func updateUser(c *gin.Context) {
 		}
 	}
 	key := req.Key
-	if key == "" {
-		c.JSON(400, gin.H{"error": "Key is required"})
+	if !requireField(c, key, "Key is required") {
 		return
 	}
 	value := req.Value
@@ -768,14 +780,14 @@ func updateUser(c *gin.Context) {
 			return
 		}
 		if err := saveBanner(imageData, user); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+			serverError(c, err)
 			return
 		}
 		if !freeAndGifUploads {
 			user.SetBalance(currencyFloat - 10)
 		}
-		user.Set("sys.banner", "https://avatars.rotur.dev/.banners/"+user.GetUsername())
-		go OnUserUpdate(user.GetId(), "sys.banner", "https://avatars.rotur.dev/.banners/"+user.GetUsername())
+		user.Set("sys.banner", bannerURL(user.GetUsername()))
+		go OnUserUpdate(user.GetId(), "sys.banner", bannerURL(user.GetUsername()))
 		go saveUsers()
 		c.JSON(200, gin.H{"message": "Banner uploaded successfully"})
 		return
@@ -799,11 +811,11 @@ func updateUser(c *gin.Context) {
 		}
 
 		if err := savePfp(imageData, user); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+			serverError(c, err)
 			return
 		}
-		broadcastUserUpdate(user.GetUsername(), "pfp", "https://avatars.rotur.dev/"+user.GetUsername())
-		go OnUserUpdate(user.GetId(), "pfp", "https://avatars.rotur.dev/"+user.GetUsername())
+		broadcastUserUpdate(user.GetUsername(), "pfp", avatarURL(user.GetUsername()))
+		go OnUserUpdate(user.GetId(), "pfp", avatarURL(user.GetUsername()))
 		go saveUsers()
 		c.JSON(200, gin.H{"message": "Profile picture uploaded successfully"})
 		return
@@ -885,12 +897,10 @@ func updateUser(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "System keys cannot be modified directly"})
 		return
 	}
-	if len(stringValue) > 1000 {
-		c.JSON(400, gin.H{"error": "Value length exceeds 1000 characters"})
+	if !requireMaxLen(c, stringValue, 1000, "Value length exceeds 1000 characters") {
 		return
 	}
-	if len(key) > 20 {
-		c.JSON(400, gin.H{"error": "Key length exceeds 20 characters"})
+	if !requireMaxLen(c, key, 20, "Key length exceeds 20 characters") {
 		return
 	}
 	if key == "username" {
@@ -1085,8 +1095,7 @@ func deleteUserKey(c *gin.Context) {
 		return
 	}
 
-	if key == "" {
-		c.JSON(400, gin.H{"error": "Key is required"})
+	if !requireField(c, key, "Key is required") {
 		return
 	}
 
@@ -1180,14 +1189,12 @@ func PerformCreditTransfer(fromUsername, toUsername Username, amount float64, no
 		if idx := getIdxOfAccountBy("username", string(taxRecipient)); taxRecipient != toUser.GetUsername() && idx != -1 {
 			taxUser, _ := getUserByIdx(idx)
 			newBalance := roundVal(taxUser.GetCredits() + taxRecipientShare)
-			taxUser.SetBalance(newBalance)
-			taxUser.addTransaction(Transaction{
+			taxUser.applyTransaction(newBalance, Transaction{
 				Note:      "Daily credit",
 				User:      toUser.GetId(),
 				Timestamp: now,
 				Amount:    taxRecipientShare,
 				Type:      "tax",
-				NewTotal:  newBalance,
 			})
 		}
 	}
@@ -1221,7 +1228,7 @@ func PerformCreditTransfer(fromUsername, toUsername Username, amount float64, no
 }
 
 func transferCredits(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	var req struct {
 		To     string `json:"to"`
@@ -1234,8 +1241,7 @@ func transferCredits(c *gin.Context) {
 	}
 	amt := fmt.Sprintf("%v", req.Amount)
 
-	if amt == "" {
-		c.JSON(400, gin.H{"error": "Amount must be provided"})
+	if !requireField(c, amt, "Amount must be provided") {
 		return
 	}
 	var nAmount float64
@@ -1263,8 +1269,7 @@ func transferCredits(c *gin.Context) {
 	}
 
 	toUsername := Username(req.To).ToLower()
-	if toUsername == "" {
-		c.JSON(400, gin.H{"error": "Recipient username and amount must be provided"})
+	if !requireField(c, toUsername, "Recipient username and amount must be provided") {
 		return
 	}
 	if toUsername == user.GetUsername().ToLower() {
@@ -1282,17 +1287,15 @@ func transferCredits(c *gin.Context) {
 }
 
 func deleteUser(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	username := Username(c.Param("username"))
-	if username == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
+	if !requireField(c, username, "Username is required") {
 		return
 	}
 
 	usernameLower := username.ToLower()
-	requester := user.GetUsername().ToLower()
-	if requester != "mist" && requester != usernameLower {
+	if !isHardcodedAdmin(user.GetUsername()) && user.GetUsername().ToLower() != usernameLower {
 		c.JSON(403, gin.H{"error": "Insufficient permissions to delete this user"})
 		return
 	}
@@ -1305,7 +1308,7 @@ func deleteUser(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "User deleted successfully"})
 }
 
-func deleteUserAdmin(c *gin.Context) {
+func performAdminUserAction(c *gin.Context, ban bool, successMsg string) {
 	if !authenticateAdmin(c) {
 		return
 	}
@@ -1318,43 +1321,24 @@ func deleteUserAdmin(c *gin.Context) {
 	}
 
 	username := Username(req.Username)
-	if username == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
+	if !requireField(c, username, "Username is required") {
 		return
 	}
 
-	if err := performUserDeletion(username, true, false); err != nil {
+	if err := performUserDeletion(username, true, ban); err != nil {
 		c.JSON(404, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(200, gin.H{"message": "User deleted successfully"})
+	c.JSON(200, gin.H{"message": successMsg})
+}
+
+func deleteUserAdmin(c *gin.Context) {
+	performAdminUserAction(c, false, "User deleted successfully")
 }
 
 func banUserAdmin(c *gin.Context) {
-	if !authenticateAdmin(c) {
-		return
-	}
-
-	var req struct {
-		Username Username `json:"username"`
-	}
-	if !bindJSON(c, &req) {
-		return
-	}
-
-	username := req.Username
-	if username == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
-		return
-	}
-
-	if err := performUserDeletion(username, true, true); err != nil {
-		c.JSON(404, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(200, gin.H{"message": "User banned successfully"})
+	performAdminUserAction(c, true, "User banned successfully")
 }
 
 func transferCreditsAdmin(c *gin.Context) {
@@ -1570,7 +1554,7 @@ func canClaimDaily(user *User) float64 {
 }
 
 func timeUntilNextClaim(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	username := user.GetUsername().ToLower()
 
@@ -1595,7 +1579,7 @@ func timeUntilNextClaim(c *gin.Context) {
 }
 
 func claimDaily(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	username := user.GetUsername().ToLower()
 
@@ -1627,19 +1611,7 @@ func claimDaily(c *gin.Context) {
 func loadDailyClaims() map[Username]float64 {
 	dailyClaimMutex.Lock()
 	defer dailyClaimMutex.Unlock()
-	data, err := os.ReadFile(DAILY_CLAIMS_FILE_PATH)
-	if err != nil {
-		// If file doesn't exist, return empty map
-		return make(map[Username]float64)
-	}
-
-	var claimsData map[Username]float64
-	if err := json.Unmarshal(data, &claimsData); err != nil {
-		// If unmarshal fails, return empty map
-		return make(map[Username]float64)
-	}
-
-	return claimsData
+	return loadJSONOrDefault(DAILY_CLAIMS_FILE_PATH, map[Username]float64{})
 }
 
 // saveDailyClaims saves daily claims data to rotur_daily.json
@@ -1660,7 +1632,7 @@ func acceptTos(c *gin.Context) {
 		return
 	}
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	// Accept the TOS by setting a flag in the user data
 	user.Set("sys.tos_accepted", true)
@@ -1691,7 +1663,7 @@ func tosUpdate(c *gin.Context) {
 // Badge API handlers
 
 func getBadges(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	usersMutex.RLock()
 	defer usersMutex.RUnlock()

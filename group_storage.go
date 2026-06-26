@@ -40,31 +40,11 @@ func getGroupIconPath(groupTag string) string {
 }
 
 func loadGroupTips(groupTag string) []GroupTip {
-	dirPath := groupDirPath(groupTag)
-	tipsPath := filepath.Join(dirPath, "tips.json")
-	data, err := os.ReadFile(tipsPath)
-	if err != nil {
-		return []GroupTip{}
-	}
-	var tips []GroupTip
-	if err := json.Unmarshal(data, &tips); err != nil {
-		return []GroupTip{}
-	}
-	return tips
+	return loadJSONOrDefault(filepath.Join(groupDirPath(groupTag), "tips.json"), []GroupTip{})
 }
 
 func loadGroupWithdrawals(groupTag string) []GroupTipWithdrawal {
-	dirPath := groupDirPath(groupTag)
-	withdrawalsPath := filepath.Join(dirPath, "withdrawals.json")
-	data, err := os.ReadFile(withdrawalsPath)
-	if err != nil {
-		return []GroupTipWithdrawal{}
-	}
-	var withdrawals []GroupTipWithdrawal
-	if err := json.Unmarshal(data, &withdrawals); err != nil {
-		return []GroupTipWithdrawal{}
-	}
-	return withdrawals
+	return loadJSONOrDefault(filepath.Join(groupDirPath(groupTag), "withdrawals.json"), []GroupTipWithdrawal{})
 }
 
 func saveGroupWithdrawals(groupTag string, withdrawals []GroupTipWithdrawal) {

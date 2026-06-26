@@ -4,11 +4,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func resolveFriendTarget(c *gin.Context, username Username) (User, bool) {
+	target, err := getAccountByUsername(username)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "Account Does Not Exist"})
+		return nil, false
+	}
+	return target, true
+}
+
 func sendFriendRequest(c *gin.Context) {
-	sender := c.MustGet("user").(*User)
+	sender := currentUser(c)
 	targetUsername := Username(c.Param("username"))
-	if targetUsername == "" {
-		c.JSON(400, gin.H{"error": "Username cannot be empty"})
+	if !requireField(c, targetUsername, "Username cannot be empty") {
 		return
 	}
 	senderName := sender.GetUsername().ToLower()
@@ -18,9 +26,8 @@ func sendFriendRequest(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "You need other friends"})
 		return
 	}
-	target, err := getAccountByUsername(targetLower)
-	if err != nil {
-		c.JSON(404, gin.H{"error": "Account Does Not Exist"})
+	target, ok := resolveFriendTarget(c, targetLower)
+	if !ok {
 		return
 	}
 	if isUserBlockedBy(target, senderId) {
@@ -50,10 +57,9 @@ func sendFriendRequest(c *gin.Context) {
 }
 
 func acceptFriendRequest(c *gin.Context) {
-	current := c.MustGet("user").(*User)
+	current := currentUser(c)
 	requesterName := Username(c.Param("username")).ToLower()
-	if requesterName == "" {
-		c.JSON(400, gin.H{"error": "Username cannot be empty"})
+	if !requireField(c, requesterName, "Username cannot be empty") {
 		return
 	}
 	currentName := current.GetUsername().ToLower()
@@ -61,9 +67,8 @@ func acceptFriendRequest(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Invalid Operation"})
 		return
 	}
-	requester, err := getAccountByUsername(requesterName)
-	if err != nil {
-		c.JSON(404, gin.H{"error": "Account Does Not Exist"})
+	requester, ok := resolveFriendTarget(c, requesterName)
+	if !ok {
 		return
 	}
 	found := current.RemoveRequest(requesterName)
@@ -83,10 +88,9 @@ func acceptFriendRequest(c *gin.Context) {
 }
 
 func rejectFriendRequest(c *gin.Context) {
-	current := c.MustGet("user").(*User)
+	current := currentUser(c)
 	requesterName := Username(c.Param("username")).ToLower()
-	if requesterName == "" {
-		c.JSON(400, gin.H{"error": "Username cannot be empty"})
+	if !requireField(c, requesterName, "Username cannot be empty") {
 		return
 	}
 	found := current.RemoveRequest(requesterName)
@@ -99,10 +103,9 @@ func rejectFriendRequest(c *gin.Context) {
 }
 
 func cancelFriendRequest(c *gin.Context) {
-	sender := c.MustGet("user").(*User)
+	sender := currentUser(c)
 	targetName := Username(c.Param("username")).ToLower()
-	if targetName == "" {
-		c.JSON(400, gin.H{"error": "Username cannot be empty"})
+	if !requireField(c, targetName, "Username cannot be empty") {
 		return
 	}
 	senderName := sender.GetUsername().ToLower()
@@ -110,9 +113,8 @@ func cancelFriendRequest(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Invalid Operation"})
 		return
 	}
-	target, err := getAccountByUsername(targetName)
-	if err != nil {
-		c.JSON(404, gin.H{"error": "Account Does Not Exist"})
+	target, ok := resolveFriendTarget(c, targetName)
+	if !ok {
 		return
 	}
 	found := target.RemoveRequest(senderName)
@@ -125,10 +127,9 @@ func cancelFriendRequest(c *gin.Context) {
 }
 
 func removeFriend(c *gin.Context) {
-	current := c.MustGet("user").(*User)
+	current := currentUser(c)
 	otherName := Username(c.Param("username")).ToLower()
-	if otherName == "" {
-		c.JSON(400, gin.H{"error": "Username cannot be empty"})
+	if !requireField(c, otherName, "Username cannot be empty") {
 		return
 	}
 	currentName := current.GetUsername().ToLower()
@@ -136,9 +137,8 @@ func removeFriend(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Cannot Remove Yourself"})
 		return
 	}
-	other, err := getAccountByUsername(otherName)
-	if err != nil {
-		c.JSON(404, gin.H{"error": "Account Does Not Exist"})
+	other, ok := resolveFriendTarget(c, otherName)
+	if !ok {
 		return
 	}
 	removedCurrent := current.RemoveFriend(otherName)
@@ -154,16 +154,16 @@ func removeFriend(c *gin.Context) {
 }
 
 func getMeFriends(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	c.JSON(200, gin.H{"friends": user.GetFriendUsers()})
 }
 
 func getMeRequests(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	c.JSON(200, gin.H{"requests": user.GetRequestedUsers()})
 }
 
 func getMeRequestsOut(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	c.JSON(200, gin.H{"requests_out": user.GetOutgoingRequests()})
 }

@@ -43,7 +43,7 @@ func linkCodeToAccount(c *gin.Context) {
 	usedCodesMutex.Lock()
 	defer usedCodesMutex.Unlock()
 	if _, exists := usedCodes[code]; exists {
-		user := c.MustGet("user").(*User)
+		user := currentUser(c)
 		usedCodes[code] = user.GetKey()
 		c.JSON(200, "Linked Successfully")
 		return

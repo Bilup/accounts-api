@@ -55,6 +55,14 @@ func renameSystem(systemName string, newName string) error {
 	return nil
 }
 
+func requireSystemOwner(c *gin.Context, system System, user *User) bool {
+	if strings.EqualFold(string(system.Owner.Name), string(user.GetUsername())) || isHardcodedAdmin(user.GetUsername()) {
+		return true
+	}
+	c.JSON(403, gin.H{"error": "Insufficient permissions"})
+	return false
+}
+
 func updateSystem(c *gin.Context) {
 	var req struct {
 		System string `json:"system"`
@@ -71,17 +79,16 @@ func updateSystem(c *gin.Context) {
 		return
 	}
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	// only allow the owner of the system or mist to update it
-	if !strings.EqualFold(string(system.Owner.Name), string(user.GetUsername())) && user.GetUsername().ToLower() != "mist" {
-		c.JSON(403, gin.H{"error": "Insufficient permissions"})
+	if !requireSystemOwner(c, system, user) {
 		return
 	}
 
 	err := setSystem(system.Name, req.Key, req.Value)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 
@@ -162,14 +169,13 @@ func getSystems(c *gin.Context) {
 }
 
 func getSystemUsers(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	// Only allow mist or the owner of the system to view users
 
 	system_data := getAllSystems()
 	system_name := c.Query("system")
-	if system_name == "" {
-		c.JSON(400, gin.H{"error": "System is required"})
+	if !requireField(c, system_name, "System is required") {
 		return
 	}
 	system, ok := system_data[system_name]
@@ -178,14 +184,13 @@ func getSystemUsers(c *gin.Context) {
 		return
 	}
 
-	if !strings.EqualFold(string(system.Owner.Name), string(user.GetUsername())) && user.GetUsername().ToLower() != "mist" {
-		c.JSON(403, gin.H{"error": "Insufficient permissions"})
+	if !requireSystemOwner(c, system, user) {
 		return
 	}
 
 	foundUsers, err := getAccountsBy("system", system.Name, -1)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 
@@ -197,10 +202,10 @@ func getSystemUsers(c *gin.Context) {
 }
 
 func reloadSystemsEndpoint(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	// Only allow mist user to reload systems (admin privilege)
-	if user.GetUsername().ToLower() != "mist" {
+	if !isHardcodedAdmin(user.GetUsername()) {
 		c.JSON(403, gin.H{"error": "Insufficient permissions"})
 		return
 	}

@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"sync"
-	"time"
 )
 
 const BADGES_FILE_PATH = "./rotur/badges.json"
@@ -44,24 +43,12 @@ func loadJSONBadges() error {
 }
 
 func watchBadgesFile() {
-	var lastMtime time.Time
-	if stat, err := os.Stat(BADGES_FILE_PATH); err == nil {
-		lastMtime = stat.ModTime()
-	}
-
-	for {
-		time.Sleep(500 * time.Millisecond)
-		if stat, err := os.Stat(BADGES_FILE_PATH); err == nil {
-			if stat.ModTime().After(lastMtime) {
-				time.Sleep(500 * time.Millisecond)
-				log.Println("Detected change in badges.json, reloading...")
-				if err := loadJSONBadges(); err != nil {
-					log.Printf("Error reloading badges: %v", err)
-				}
-				lastMtime = stat.ModTime()
-			}
+	watchFile(BADGES_FILE_PATH, func() {
+		log.Println("Detected change in badges.json, reloading...")
+		if err := loadJSONBadges(); err != nil {
+			log.Printf("Error reloading badges: %v", err)
 		}
-	}
+	})
 }
 
 func calculateUserBadges(user User) []Badge {

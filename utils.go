@@ -120,7 +120,7 @@ func getFloatOrDefault(val any, defaultVal float64) float64 {
 
 func requireTier(tier string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user := c.MustGet("user").(*User)
+		user := currentUser(c)
 		user_tier := user.GetSubscription().Tier
 		if hasTierOrHigher(user_tier, tier) {
 			c.Next()
@@ -152,7 +152,7 @@ func hasTierOrHigher(tier, required string) bool {
 
 func requireStanding(minLevel StandingLevel) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user := c.MustGet("user").(*User)
+		user := currentUser(c)
 		if user.HasStandingOrHigher(minLevel) {
 			c.Next()
 			return
@@ -700,27 +700,7 @@ func deleteAccountAtIndexFast(idx int) error {
 }
 
 func loadGifts() {
-	file, err := os.Open("gifts.json")
-	if err != nil {
-		if os.IsNotExist(err) {
-			gifts = []Gift{}
-			return
-		}
-		log.Printf("Error opening gifts.json: %v", err)
-		gifts = []Gift{}
-		return
-	}
-	defer file.Close()
-
-	var loaded []Gift
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&loaded); err != nil {
-		log.Printf("Error decoding gifts.json: %v", err)
-		gifts = []Gift{}
-		return
-	}
-
-	gifts = loaded
+	gifts = loadJSONOrDefault("gifts.json", []Gift{})
 	log.Printf("Loaded %d gifts", len(gifts))
 }
 
@@ -753,14 +733,12 @@ func cleanExpiredGifts() {
 			creator := getUserById(gift.CreatorId)
 			if len(creator) > 0 {
 				newBal := roundVal(creator.GetCredits() + gift.Amount)
-				creator.SetBalance(newBal)
-				creator.addTransaction(Transaction{
+				creator.applyTransaction(newBal, Transaction{
 					Note:      "Gift expired: " + gift.Code,
 					User:      UserId(""),
 					Amount:    gift.Amount,
 					Type:      "gift_refund",
 					Timestamp: now,
-					NewTotal:  newBal,
 					GiftId:    gift.Id,
 					GiftCode:  gift.Code,
 				})
@@ -813,21 +791,7 @@ func getGiftsByCreator(creatorId UserId) []Gift {
 }
 
 func loadCosmeticGifts() {
-	if _, err := os.Stat("cosmetic_gifts.json"); os.IsNotExist(err) {
-		cosmeticGifts = []CosmeticGift{}
-		return
-	}
-	data, err := os.ReadFile("cosmetic_gifts.json")
-	if err != nil {
-		log.Printf("Error reading cosmetic_gifts.json: %v", err)
-		cosmeticGifts = []CosmeticGift{}
-		return
-	}
-	if err := json.Unmarshal(data, &cosmeticGifts); err != nil {
-		log.Printf("Error unmarshaling cosmetic_gifts.json: %v", err)
-		cosmeticGifts = []CosmeticGift{}
-		return
-	}
+	cosmeticGifts = loadJSONOrDefault("cosmetic_gifts.json", []CosmeticGift{})
 	log.Printf("Loaded %d cosmetic gifts", len(cosmeticGifts))
 }
 

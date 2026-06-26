@@ -8,7 +8,7 @@ import (
 )
 
 func createSubToken(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	tokenType := c.MustGet("token_type").(string)
 
 	if tokenType != "main" {
@@ -29,13 +29,11 @@ func createSubToken(c *gin.Context) {
 		return
 	}
 
-	if req.Name == "" {
-		c.JSON(400, gin.H{"error": "Token name is required"})
+	if !requireField(c, req.Name, "Token name is required") {
 		return
 	}
 
-	if len(req.Name) > 50 {
-		c.JSON(400, gin.H{"error": "Token name must be 50 characters or less"})
+	if !requireMaxLen(c, req.Name, 50, "Token name must be 50 characters or less") {
 		return
 	}
 
@@ -135,7 +133,7 @@ func createSubToken(c *gin.Context) {
 }
 
 func listSubTokens(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	userId := user.GetId()
 	store, err := loadTokenStore(userId)
@@ -170,7 +168,7 @@ func getSubToken(c *gin.Context) {
 		return
 	}
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	userId := user.GetId()
 	store, err := loadTokenStore(userId)
 	if err != nil {
@@ -189,7 +187,7 @@ func getSubToken(c *gin.Context) {
 }
 
 func updateSubToken(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	tokenType := c.MustGet("token_type").(string)
 
 	if tokenType != "main" {
@@ -277,7 +275,7 @@ func updateSubToken(c *gin.Context) {
 }
 
 func revokeSubToken(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	tokenType := c.MustGet("token_type").(string)
 
 	if tokenType != "main" {
@@ -322,7 +320,7 @@ func revokeSubToken(c *gin.Context) {
 }
 
 func deleteSubToken(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	tokenType := c.MustGet("token_type").(string)
 
 	if tokenType != "main" {
@@ -369,7 +367,7 @@ func deleteSubToken(c *gin.Context) {
 }
 
 func renameSubToken(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	tokenType := c.MustGet("token_type").(string)
 
 	if tokenType != "main" {
@@ -425,7 +423,7 @@ func listPermissions(c *gin.Context) {
 }
 
 func listActiveSubTokens(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	userId := user.GetId()
 	store, err := loadTokenStore(userId)
@@ -453,7 +451,7 @@ func listActiveSubTokens(c *gin.Context) {
 }
 
 func getSubTokenActivity(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	tokenID := c.Param("id")
 
 	userId := user.GetId()

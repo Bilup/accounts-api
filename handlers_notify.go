@@ -184,26 +184,11 @@ func saveNotifyEndpoints(username Username, file NotificationEndpointsFile) erro
 }
 
 func getNotifyAllowed(u User) NotifyAllowedMap {
-	raw := u.Get("sys.notify_allowed")
-	if raw == nil {
-		return NotifyAllowedMap{}
-	}
-	b, err := json.Marshal(raw)
-	if err != nil {
-		return NotifyAllowedMap{}
-	}
-	var m NotifyAllowedMap
-	if err := json.Unmarshal(b, &m); err != nil {
-		return NotifyAllowedMap{}
-	}
-	return m
+	return reJSON(u.Get("sys.notify_allowed"), NotifyAllowedMap{})
 }
 
 func setNotifyAllowed(u User, m NotifyAllowedMap) {
-	b, _ := json.Marshal(m)
-	var raw map[string]any
-	json.Unmarshal(b, &raw)
-	u.Set("sys.notify_allowed", raw)
+	u.Set("sys.notify_allowed", toGenericJSON(m))
 }
 
 func isNotifyAllowed(u User, source string, senderId UserId) bool {
@@ -256,19 +241,7 @@ func incrementNotifyCount(u User, source string, senderId UserId) {
 }
 
 func getNotifyLog(u User) []NotifyLogEntry {
-	raw := u.Get("sys.notify_log")
-	if raw == nil {
-		return []NotifyLogEntry{}
-	}
-	b, err := json.Marshal(raw)
-	if err != nil {
-		return []NotifyLogEntry{}
-	}
-	var entries []NotifyLogEntry
-	if err := json.Unmarshal(b, &entries); err != nil {
-		return []NotifyLogEntry{}
-	}
-	return entries
+	return reJSON(u.Get("sys.notify_log"), []NotifyLogEntry{})
 }
 
 func addNotifyLogEntry(u User, entry NotifyLogEntry) {
@@ -277,15 +250,12 @@ func addNotifyLogEntry(u User, entry NotifyLogEntry) {
 	if len(entries) > 200 {
 		entries = entries[len(entries)-200:]
 	}
-	b, _ := json.Marshal(entries)
-	var raw []any
-	json.Unmarshal(b, &raw)
-	u.Set("sys.notify_log", raw)
+	u.Set("sys.notify_log", toGenericJSON(entries))
 	go saveUsers()
 }
 
 func registerForNotifications(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	username := user.GetUsername()
 
 	var req struct {
@@ -299,12 +269,10 @@ func registerForNotifications(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "endpoint, p256dh, auth, source, and fingerprint are required"})
 		return
 	}
-	if len(req.Source) > 64 {
-		c.JSON(400, gin.H{"error": "source too long (max 64 chars)"})
+	if !requireMaxLen(c, req.Source, 64, "source too long (max 64 chars)") {
 		return
 	}
-	if len(req.Endpoint) > 2048 {
-		c.JSON(400, gin.H{"error": "endpoint URL too long (max 2048 chars)"})
+	if !requireMaxLen(c, req.Endpoint, 2048, "endpoint URL too long (max 2048 chars)") {
 		return
 	}
 	if !strings.HasPrefix(req.Endpoint, "http://") && !strings.HasPrefix(req.Endpoint, "https://") {
@@ -376,12 +344,11 @@ func registerForNotifications(c *gin.Context) {
 }
 
 func checkNotifyRegistration(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	username := user.GetUsername()
 	source := c.Query("source")
 	fingerprint := c.Query("fingerprint")
-	if source == "" || fingerprint == "" {
-		c.JSON(400, gin.H{"error": "source and fingerprint query params are required"})
+	if !requireFields(c, "source and fingerprint query params are required", source, fingerprint) {
 		return
 	}
 
@@ -411,7 +378,7 @@ func checkNotifyRegistration(c *gin.Context) {
 }
 
 func getNotifyEndpoints(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	username := user.GetUsername()
 
 	mu := getNotifyMutex(username)
@@ -429,11 +396,10 @@ func getNotifyEndpoints(c *gin.Context) {
 }
 
 func deleteNotifyDevice(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	username := user.GetUsername()
 	deviceID := c.Param("device_id")
-	if deviceID == "" {
-		c.JSON(400, gin.H{"error": "device_id is required"})
+	if !requireField(c, deviceID, "device_id is required") {
 		return
 	}
 
@@ -481,7 +447,7 @@ func sortSenders(senders []SenderInfo) []SenderInfo {
 }
 
 func getNotifyAllowedSenders(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	allowed := getNotifyAllowed(*user)
 
 	type SourceAllowed struct {
@@ -506,10 +472,9 @@ func getNotifyAllowedSenders(c *gin.Context) {
 }
 
 func addNotifyAllowedSender(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	targetUsername := Username(c.Param("username"))
-	if targetUsername == "" {
-		c.JSON(400, gin.H{"error": "username is required"})
+	if !requireField(c, targetUsername, "username is required") {
 		return
 	}
 
@@ -536,11 +501,10 @@ func addNotifyAllowedSender(c *gin.Context) {
 }
 
 func removeNotifyAllowedSender(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	targetUsername := Username(c.Param("username"))
 	source := c.Query("source")
-	if targetUsername == "" || source == "" {
-		c.JSON(400, gin.H{"error": "username and source are required"})
+	if !requireFields(c, "username and source are required", string(targetUsername), source) {
 		return
 	}
 
@@ -559,7 +523,7 @@ func removeNotifyAllowedSender(c *gin.Context) {
 }
 
 func getNotifyLogHandler(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	entries := getNotifyLog(*user)
 	c.JSON(200, gin.H{
 		"log":   entries,
@@ -644,10 +608,9 @@ func sendPushNotificationToUser(target User, sender User, req NotificationReques
 func getNotifiableUsers(c *gin.Context) {
 	ensureVAPIDKeys()
 
-	sender := c.MustGet("user").(*User)
+	sender := currentUser(c)
 	targetSource := c.Param("source")
-	if targetSource == "" {
-		c.JSON(400, gin.H{"error": "source is required"})
+	if !requireField(c, targetSource, "source is required") {
 		return
 	}
 
@@ -674,10 +637,9 @@ func getNotifiableUsers(c *gin.Context) {
 func notifyUser(c *gin.Context) {
 	ensureVAPIDKeys()
 
-	sender := c.MustGet("user").(*User)
+	sender := currentUser(c)
 	targetUsername := Username(c.Param("username"))
-	if targetUsername == "" {
-		c.JSON(400, gin.H{"error": "username is required"})
+	if !requireField(c, targetUsername, "username is required") {
 		return
 	}
 	var req NotificationRequest
@@ -686,12 +648,10 @@ func notifyUser(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "source is required"})
 		return
 	}
-	if len(req.Title) > 256 {
-		c.JSON(400, gin.H{"error": "title too long (max 256 chars)"})
+	if !requireMaxLen(c, req.Title, 256, "title too long (max 256 chars)") {
 		return
 	}
-	if len(req.Body) > 1024 {
-		c.JSON(400, gin.H{"error": "body too long (max 1024 chars)"})
+	if !requireMaxLen(c, req.Body, 1024, "body too long (max 1024 chars)") {
 		return
 	}
 
@@ -725,19 +685,17 @@ func notifyUser(c *gin.Context) {
 func notifyManyUsers(c *gin.Context) {
 	ensureVAPIDKeys()
 
-	sender := c.MustGet("user").(*User)
+	sender := currentUser(c)
 	var req NotificationRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "source is required"})
 		return
 	}
-	if len(req.Title) > 256 {
-		c.JSON(400, gin.H{"error": "title too long (max 256 chars)"})
+	if !requireMaxLen(c, req.Title, 256, "title too long (max 256 chars)") {
 		return
 	}
-	if len(req.Body) > 1024 {
-		c.JSON(400, gin.H{"error": "body too long (max 1024 chars)"})
+	if !requireMaxLen(c, req.Body, 1024, "body too long (max 1024 chars)") {
 		return
 	}
 

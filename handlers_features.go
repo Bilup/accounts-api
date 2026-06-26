@@ -23,15 +23,8 @@ var (
 )
 
 func loadFeatureStores() {
-	if data, err := os.ReadFile(bookmarksFilePath); err == nil {
-		_ = json.Unmarshal(data, &bookmarks)
-	}
-	if bookmarks == nil {
-		bookmarks = map[UserId][]string{}
-	}
-	if data, err := os.ReadFile(scheduledFilePath); err == nil {
-		_ = json.Unmarshal(data, &scheduledPosts)
-	}
+	bookmarks = loadJSONOrDefault(bookmarksFilePath, map[UserId][]string{})
+	scheduledPosts = loadJSONOrDefault(scheduledFilePath, []Post(nil))
 }
 
 func saveBookmarks() {
@@ -55,7 +48,7 @@ func saveScheduledPosts() {
 // ---- Views ----
 
 func viewPost(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	uid := user.GetId()
 
 	batch := c.Query("ids") != ""
@@ -68,8 +61,7 @@ func viewPost(c *gin.Context) {
 		}
 	} else {
 		id := c.Query("id")
-		if id == "" {
-			c.JSON(400, gin.H{"error": "Post ID is required"})
+		if !requireField(c, id, "Post ID is required") {
 			return
 		}
 		ids = []string{id}
@@ -123,7 +115,7 @@ func viewPost(c *gin.Context) {
 // ---- Bookmarks (Plus+) ----
 
 func getBookmarks(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	bookmarksMutex.RLock()
 	ids := append([]string{}, bookmarks[user.GetId()]...)
 	bookmarksMutex.RUnlock()
@@ -144,14 +136,13 @@ func getBookmarks(c *gin.Context) {
 }
 
 func addBookmark(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	if !hasTierOrHigher(user.GetSubscription().Tier, "Plus") {
 		c.JSON(403, gin.H{"error": "Saving posts requires a Plus subscription or higher"})
 		return
 	}
 	id := c.Query("id")
-	if id == "" {
-		c.JSON(400, gin.H{"error": "Post ID is required"})
+	if !requireField(c, id, "Post ID is required") {
 		return
 	}
 	if getPostById(id) == nil {
@@ -179,7 +170,7 @@ func addBookmark(c *gin.Context) {
 }
 
 func removeBookmark(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	id := c.Query("id")
 	uid := user.GetId()
 	bookmarksMutex.Lock()
@@ -199,11 +190,10 @@ func removeBookmark(c *gin.Context) {
 // ---- Poll voting ----
 
 func votePoll(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	id := c.Query("id")
 	optionStr := c.Query("option")
-	if id == "" || optionStr == "" {
-		c.JSON(400, gin.H{"error": "Post ID and option are required"})
+	if !requireFields(c, "Post ID and option are required", id, optionStr) {
 		return
 	}
 	option, err := strconv.Atoi(optionStr)
@@ -252,7 +242,7 @@ func addScheduledPost(p Post) {
 }
 
 func getMyScheduled(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	uid := user.GetId()
 	scheduledMutex.Lock()
 	out := make([]NetPost, 0)

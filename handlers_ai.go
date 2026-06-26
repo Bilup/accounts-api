@@ -57,7 +57,7 @@ func handleAI(c *gin.Context) {
 	}
 	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(data))
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 
@@ -66,7 +66,7 @@ func handleAI(c *gin.Context) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	defer resp.Body.Close()

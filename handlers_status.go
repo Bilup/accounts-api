@@ -568,8 +568,7 @@ func (c *Conn) handleRoomState(msg map[string]json.RawMessage) {
 
 func statusGetHTTP(c *gin.Context) {
 	name := c.Query("name")
-	if name == "" {
-		c.JSON(400, gin.H{"error": "name parameter missing"})
+	if !requireField(c, name, "name parameter missing") {
 		return
 	}
 	uid := Username(name).ToLower().Id()

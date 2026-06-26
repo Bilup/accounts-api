@@ -22,14 +22,13 @@ func findItemByNameUnsafe(name string) *Item {
 func transferItem(c *gin.Context) {
 	name := strings.ToLower(c.Param("name"))
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	targetUsername := Username(c.Query("username"))
 	if targetUsername == "" {
 		targetUsername = Username(c.Query("to"))
 	}
-	if targetUsername == "" {
-		c.JSON(400, gin.H{"error": "Target username is required"})
+	if !requireField(c, targetUsername, "Target username is required") {
 		return
 	}
 	targetId := targetUsername.Id()
@@ -89,7 +88,7 @@ func transferItem(c *gin.Context) {
 func buyItem(c *gin.Context) {
 	name := strings.ToLower(c.Param("name"))
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
@@ -144,26 +143,22 @@ func buyItem(c *gin.Context) {
 	price := float64(targetItem.Price)
 
 	newBuyerBal := roundVal(userCurrency - price)
-	user.SetBalance(newBuyerBal)
-	user.addTransaction(Transaction{
+	user.applyTransaction(newBuyerBal, Transaction{
 		Note:      "Item purchase: " + targetItem.Name,
 		User:      oldOwner,
 		Amount:    price,
 		Type:      "item_buy",
-		NewTotal:  newBuyerBal,
 		Timestamp: now,
 	})
 
 	seller := getUserById(oldOwner)
 	if len(seller) > 0 {
 		newSellerBal := roundVal(seller.GetCredits() + price)
-		seller.SetBalance(newSellerBal)
-		seller.addTransaction(Transaction{
+		seller.applyTransaction(newSellerBal, Transaction{
 			Note:      "Item sold: " + targetItem.Name,
 			User:      user.GetId(),
 			Amount:    price,
 			Type:      "item_sale",
-			NewTotal:  newSellerBal,
 			Timestamp: now,
 		})
 	}
@@ -190,7 +185,7 @@ func buyItem(c *gin.Context) {
 func stopSellingItem(c *gin.Context) {
 	name := strings.ToLower(c.Param("name"))
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
@@ -215,11 +210,10 @@ func stopSellingItem(c *gin.Context) {
 func setItemPrice(c *gin.Context) {
 	name := strings.ToLower(c.Param("name"))
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	priceStr := c.Query("price")
-	if priceStr == "" {
-		c.JSON(400, gin.H{"error": "Price is required"})
+	if !requireField(c, priceStr, "Price is required") {
 		return
 	}
 
@@ -257,11 +251,10 @@ func setItemPrice(c *gin.Context) {
 }
 
 func createItem(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	itemStr := c.Query("item")
-	if itemStr == "" {
-		c.JSON(400, gin.H{"error": "Item data is required"})
+	if !requireField(c, itemStr, "Item data is required") {
 		return
 	}
 
@@ -371,7 +364,7 @@ func getItem(c *gin.Context) {
 func deleteItem(c *gin.Context) {
 	name := strings.ToLower(c.Param("name"))
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
@@ -424,11 +417,10 @@ func listItems(c *gin.Context) {
 func updateItem(c *gin.Context) {
 	name := strings.ToLower(c.Param("name"))
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	newDataStr := c.Query("data")
-	if newDataStr == "" {
-		c.JSON(400, gin.H{"error": "New data is required"})
+	if !requireField(c, newDataStr, "New data is required") {
 		return
 	}
 
@@ -468,7 +460,7 @@ func updateItem(c *gin.Context) {
 func sellItem(c *gin.Context) {
 	name := strings.ToLower(c.Param("name"))
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
@@ -491,14 +483,7 @@ func sellItem(c *gin.Context) {
 }
 
 func getSellingItems(c *gin.Context) {
-	limitStr := c.DefaultQuery("limit", "50")
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 {
-		limit = 50
-	}
-	if limit > 100 {
-		limit = 100
-	}
+	limit := queryLimit(c, 50, 100)
 
 	itemsMutex.RLock()
 	sellingItems := make([]NetItem, 0)
@@ -532,9 +517,9 @@ func getSellingItems(c *gin.Context) {
 func adminAddUserToItem(c *gin.Context) {
 	itemID := c.Param("id")
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
-	isMist := user.GetUsername().ToLower() == "mist"
+	isMist := isHardcodedAdmin(user.GetUsername())
 	if !isMist {
 		c.JSON(403, gin.H{"error": "Invalid authentication key"})
 		return
@@ -544,8 +529,7 @@ func adminAddUserToItem(c *gin.Context) {
 	if username == "" {
 		username = Username(c.Query("name"))
 	}
-	if username == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
+	if !requireField(c, username, "Username is required") {
 		return
 	}
 	userId := username.Id()

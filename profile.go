@@ -101,7 +101,7 @@ func renderBioRegex(bio string, profile User, otherKeys profileResp) string {
 			}
 			format = normalizeUserTimeLayout(format)
 
-			tzStr := getStringOrEmpty(profile.Get("timezone"))
+			tzStr := profile.GetString("timezone")
 			offsetHours, ok := parseUTCOffsetHours(tzStr)
 			if !ok {
 				offsetHours = 0
@@ -231,9 +231,9 @@ func getProfile(c *gin.Context) {
 			Badges:    []Badge{},
 			Currency:  0,
 			MaxSize:   "0",
-			Avatar:    "https://avatars.rotur.dev/.banned_user",
+			Avatar:    avatarURL(".banned_user"),
 			Bio:       "This user is banned.",
-			Banner:    "https://avatars.rotur.dev/.banners/.banned_user",
+			Banner:    bannerURL(".banned_user"),
 			Index:     0,
 			Followers: 0,
 			Following: 0,
@@ -329,10 +329,10 @@ func getProfile(c *gin.Context) {
 
 	profileData := profileResp{
 		Username:     foundUser.GetUsername(),
-		Avatar:       "https://avatars.rotur.dev/" + string(foundUser.GetUsername()),
+		Avatar:       avatarURL(string(foundUser.GetUsername())),
 		Followers:    followerCount,
 		Following:    followingCount,
-		Pronouns:     getStringOrEmpty(foundUser.Get("pronouns")),
+		Pronouns:     foundUser.GetString("pronouns"),
 		System:       foundUser.GetSystem(),
 		Created:      foundUser.GetCreated(),
 		Badges:       calculatedBadges,
@@ -362,7 +362,7 @@ func getProfile(c *gin.Context) {
 	}
 
 	benefits := foundUser.GetSubscriptionBenefits()
-	bio := getStringOrEmpty(foundUser.Get("bio"))
+	bio := foundUser.GetString("bio")
 	if bio != "" && benefits.Has_Bio_templating {
 		bio = renderBioRegex(bio, foundUser, profileData)
 	}
@@ -373,7 +373,7 @@ func getProfile(c *gin.Context) {
 	profileData.Bio = bio
 
 	if foundUser.Get("sys.banner") != nil || foundUser.Get("banner") != nil {
-		profileData.Banner = "https://avatars.rotur.dev/.banners/" + string(foundUser.GetUsername())
+		profileData.Banner = bannerURL(string(foundUser.GetUsername()))
 	}
 
 	if includePosts {
@@ -401,8 +401,7 @@ func getProfile(c *gin.Context) {
 
 func getExists(c *gin.Context) {
 	username := Username(c.Query("username")).ToLower()
-	if username == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
+	if !requireField(c, username, "Username is required") {
 		return
 	}
 	userId := getIdByUsername(username)

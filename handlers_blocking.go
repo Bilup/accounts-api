@@ -7,17 +7,16 @@ import (
 )
 
 func getBlocking(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	c.JSON(200, user.GetBlockedUsers())
 }
 
 func blockUser(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	userId := Username(c.Param("username")).Id()
 
-	if userId == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
+	if !requireField(c, userId, "Username is required") {
 		return
 	}
 
@@ -45,11 +44,10 @@ func blockUser(c *gin.Context) {
 }
 
 func unblockUser(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	userId := Username(c.Param("username")).Id()
 
-	if userId == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
+	if !requireField(c, userId, "Username is required") {
 		return
 	}
 

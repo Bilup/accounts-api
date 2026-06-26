@@ -7,6 +7,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func nextRecoveryLevel(current StandingLevel) StandingLevel {
+	switch current {
+	case StandingSuspended:
+		return StandingWarning
+	case StandingWarning:
+		return StandingGood
+	case StandingBanned:
+		return StandingWarning
+	default:
+		return StandingGood
+	}
+}
+
 func setStandingAdmin(c *gin.Context) {
 	if !authenticateAdmin(c) {
 		return
@@ -22,28 +35,16 @@ func setStandingAdmin(c *gin.Context) {
 		return
 	}
 
-	if req.Level == "" {
-		c.JSON(400, gin.H{"error": "standing level is required"})
+	if !requireField(c, req.Level, "standing level is required") {
 		return
 	}
 
-	if req.Reason == "" {
-		c.JSON(400, gin.H{"error": "reason is required"})
+	if !requireField(c, req.Reason, "reason is required") {
 		return
 	}
 
-	userId := getIdByUsername(Username(req.Username))
-	if userId == "" {
-		c.JSON(404, gin.H{"error": "user not found"})
-		return
-	}
-
-	usersMutex.RLock()
-	user := getUserById(userId)
-	usersMutex.RUnlock()
-
-	if len(user) == 0 {
-		c.JSON(404, gin.H{"error": "user not found"})
+	user, ok := resolveUserByName(c, req.Username)
+	if !ok {
 		return
 	}
 
@@ -76,23 +77,12 @@ func getStandingHistoryAdmin(c *gin.Context) {
 		return
 	}
 
-	if req.Username == "" {
-		c.JSON(400, gin.H{"error": "username is required"})
+	if !requireField(c, req.Username, "username is required") {
 		return
 	}
 
-	userId := getIdByUsername(Username(req.Username))
-	if userId == "" {
-		c.JSON(404, gin.H{"error": "user not found"})
-		return
-	}
-
-	usersMutex.RLock()
-	user := getUserById(userId)
-	usersMutex.RUnlock()
-
-	if len(user) == 0 {
-		c.JSON(404, gin.H{"error": "user not found"})
+	user, ok := resolveUserByName(c, req.Username)
+	if !ok {
 		return
 	}
 
@@ -119,28 +109,16 @@ func recoverStandingAdmin(c *gin.Context) {
 		return
 	}
 
-	if req.Username == "" {
-		c.JSON(400, gin.H{"error": "username is required"})
+	if !requireField(c, req.Username, "username is required") {
 		return
 	}
 
-	if req.Reason == "" {
-		c.JSON(400, gin.H{"error": "reason is required"})
+	if !requireField(c, req.Reason, "reason is required") {
 		return
 	}
 
-	userId := getIdByUsername(Username(req.Username))
-	if userId == "" {
-		c.JSON(404, gin.H{"error": "user not found"})
-		return
-	}
-
-	usersMutex.RLock()
-	user := getUserById(userId)
-	usersMutex.RUnlock()
-
-	if len(user) == 0 {
-		c.JSON(404, gin.H{"error": "user not found"})
+	user, ok := resolveUserByName(c, req.Username)
+	if !ok {
 		return
 	}
 
@@ -155,18 +133,7 @@ func recoverStandingAdmin(c *gin.Context) {
 		adminId = "unknown"
 	}
 
-	var newLevel StandingLevel
-	switch current {
-	case StandingSuspended:
-		newLevel = StandingWarning
-	case StandingWarning:
-		newLevel = StandingGood
-	case StandingBanned:
-		newLevel = StandingWarning
-	default:
-		newLevel = StandingGood
-	}
-
+	newLevel := nextRecoveryLevel(current)
 	user.SetStanding(newLevel, req.Reason, UserId(adminId))
 
 	go saveUsers()
@@ -225,23 +192,12 @@ func startStandingRecoveryChecker() {
 
 func GetUserStanding(c *gin.Context) {
 	username := c.Query("username")
-	if username == "" {
-		c.JSON(400, gin.H{"error": "username is required"})
+	if !requireField(c, username, "username is required") {
 		return
 	}
 
-	userId := getIdByUsername(Username(username))
-	if userId == "" {
-		c.JSON(404, gin.H{"error": "user not found"})
-		return
-	}
-
-	usersMutex.RLock()
-	user := getUserById(userId)
-	usersMutex.RUnlock()
-
-	if len(user) == 0 {
-		c.JSON(404, gin.H{"error": "user not found"})
+	user, ok := resolveUserByName(c, username)
+	if !ok {
 		return
 	}
 

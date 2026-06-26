@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log"
 	"maps"
 	"net/http"
@@ -16,7 +15,7 @@ import (
 )
 
 func getNotifications(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	timePeriod := 1
 	if timePeriodStr := c.Query("after"); timePeriodStr != "" {
@@ -143,7 +142,7 @@ func sendPostToDiscord(postData NetPost) {
 
 	webhookData := map[string]any{
 		"username":   username,
-		"avatar_url": fmt.Sprintf("https://avatars.rotur.dev/%s", username),
+		"avatar_url": avatarURL(username),
 		"content":    postData.Content,
 	}
 
@@ -156,7 +155,7 @@ func sendPostToDiscord(postData NetPost) {
 func sendReportToDiscord(reportData string) {
 	webhookData := map[string]any{
 		"username":   "Rotur",
-		"avatar_url": "https://avatars.rotur.dev/rotur",
+		"avatar_url": avatarURL("rotur"),
 		"content":    "<@603952506330021898> Reported: " + reportData,
 	}
 

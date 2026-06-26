@@ -13,8 +13,7 @@ import (
 // webhook that kofi sends to us when transactions are made.
 func handleKofiTransaction(c *gin.Context) {
 	data := c.PostForm("data")
-	if data == "" {
-		c.JSON(400, gin.H{"error": "No data found"})
+	if !requireField(c, data, "No data found") {
 		return
 	}
 
@@ -130,14 +129,12 @@ func handleKofiTransaction(c *gin.Context) {
 			addCredits := func(credits int) {
 				now := time.Now().UnixMilli()
 				balance := float64(account.GetCredits()) + float64(credits)
-				account.SetBalance(balance)
-				account.addTransaction(Transaction{
+				account.applyTransaction(balance, Transaction{
 					Note:      fmt.Sprintf("%d credit purchase", credits),
 					User:      Username("rotur").Id(),
 					Timestamp: now,
 					Amount:    float64(credits),
 					Type:      "transfer",
-					NewTotal:  balance,
 				})
 				go saveUsers()
 			}
@@ -173,8 +170,7 @@ func setSubscription(c *gin.Context) {
 	tier, _ := data["tier"].(string)
 	username := Username(usernameStr)
 
-	if username == "" || tier == "" {
-		c.JSON(400, gin.H{"error": "Username and tier are required"})
+	if !requireFields(c, "Username and tier are required", usernameStr, tier) {
 		return
 	}
 
@@ -204,7 +200,7 @@ func setSubscription(c *gin.Context) {
 }
 
 func getUserSubscriptionBenefits(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	benefits := user.GetSubscriptionBenefits()
 	sub := user.GetSubscription()

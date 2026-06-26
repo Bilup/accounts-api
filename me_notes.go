@@ -3,7 +3,7 @@ package main
 import "github.com/gin-gonic/gin"
 
 func getNotes(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	notes := user.GetNotesNet()
 
@@ -12,12 +12,11 @@ func getNotes(c *gin.Context) {
 
 func noteUser(c *gin.Context) {
 	username := Username(c.Param("username")).ToLower()
-	if username == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
+	if !requireField(c, username, "Username is required") {
 		return
 	}
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	var req struct {
 		Note string `json:"note"`
@@ -25,8 +24,7 @@ func noteUser(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		req.Note = c.Query("note")
 	}
-	if req.Note == "" {
-		c.JSON(400, gin.H{"error": "Note content is required"})
+	if !requireField(c, req.Note, "Note content is required") {
 		return
 	}
 
@@ -41,12 +39,11 @@ func noteUser(c *gin.Context) {
 
 func deleteNote(c *gin.Context) {
 	username := Username(c.Param("username")).ToLower()
-	if username == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
+	if !requireField(c, username, "Username is required") {
 		return
 	}
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	user.RemoveNote(username)
 	go saveUsers()
 	c.JSON(200, gin.H{"success": true})

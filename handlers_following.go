@@ -7,13 +7,12 @@ import (
 )
 
 func followUser(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	targetUsername := Username(c.Query("username"))
 	if targetUsername == "" {
 		targetUsername = Username(c.Query("name"))
 	}
-	if targetUsername == "" {
-		c.JSON(400, gin.H{"error": "Target username is required"})
+	if !requireField(c, targetUsername, "Target username is required") {
 		return
 	}
 	targetId := targetUsername.Id()
@@ -75,13 +74,12 @@ func followUser(c *gin.Context) {
 }
 
 func unfollowUser(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	targetUsername := Username(c.Query("username"))
 	if targetUsername == "" {
 		targetUsername = Username(c.Query("name"))
 	}
-	if targetUsername == "" {
-		c.JSON(400, gin.H{"error": "Target username is required"})
+	if !requireField(c, targetUsername, "Target username is required") {
 		return
 	}
 	targetId := targetUsername.Id()
@@ -155,8 +153,7 @@ func getFollowing(c *gin.Context) {
 	if name == "" {
 		name = Username(c.Query("username"))
 	}
-	if name == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
+	if !requireField(c, name, "Username is required") {
 		return
 	}
 
@@ -186,8 +183,7 @@ func getFollowers(c *gin.Context) {
 	if name == "" {
 		name = Username(c.Query("username"))
 	}
-	if name == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
+	if !requireField(c, name, "Username is required") {
 		return
 	}
 

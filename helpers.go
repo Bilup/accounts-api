@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -50,6 +52,73 @@ func bindJSON(c *gin.Context, dst any) bool {
 		return false
 	}
 	return true
+}
+
+func currentUser(c *gin.Context) *User {
+	return c.MustGet("user").(*User)
+}
+
+func serverError(c *gin.Context, err error) {
+	c.JSON(500, gin.H{"error": err.Error()})
+}
+
+func toGenericJSON(v any) any {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var out any
+	json.Unmarshal(b, &out)
+	return out
+}
+
+func reJSON[T any](raw any, empty T) T {
+	if raw == nil {
+		return empty
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return empty
+	}
+	var out T
+	if err := json.Unmarshal(b, &out); err != nil {
+		return empty
+	}
+	return out
+}
+
+func requireField[T ~string](c *gin.Context, value T, errMsg string) bool {
+	if value == "" {
+		c.JSON(400, gin.H{"error": errMsg})
+		return false
+	}
+	return true
+}
+
+func requireMaxLen[T ~string](c *gin.Context, value T, max int, errMsg string) bool {
+	if len(value) > max {
+		c.JSON(400, gin.H{"error": errMsg})
+		return false
+	}
+	return true
+}
+
+func requireFields[T ~string](c *gin.Context, errMsg string, values ...T) bool {
+	for _, v := range values {
+		if v == "" {
+			c.JSON(400, gin.H{"error": errMsg})
+			return false
+		}
+	}
+	return true
+}
+
+func queryLimit(c *gin.Context, def, max int) int {
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", strconv.Itoa(def)))
+	if err != nil || limit <= 0 {
+		limit = def
+	}
+	return clamp(limit, 1, max)
 }
 
 func getStringSlice(u User, key string) []string {

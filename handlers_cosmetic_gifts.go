@@ -8,7 +8,7 @@ import (
 )
 
 func giftCosmetic(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	userId := user.GetId()
 
 	var req struct {
@@ -29,8 +29,7 @@ func giftCosmetic(c *gin.Context) {
 	}
 
 	// Validate recipient
-	if req.To == "" {
-		c.JSON(400, gin.H{"error": "Recipient username is required"})
+	if !requireField(c, req.To, "Recipient username is required") {
 		return
 	}
 	toUser, err := getAccountByUsername(Username(req.To))
@@ -96,8 +95,6 @@ func giftCosmetic(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Insufficient credits"})
 		return
 	}
-	user.SetBalance(newPurchaserBal)
-
 	creatorShare := roundVal(entry.Price * (entry.CreatorPct / 100.0))
 	platformShare := roundVal(entry.Price - creatorShare)
 
@@ -105,46 +102,15 @@ func giftCosmetic(c *gin.Context) {
 
 	note := trimAndCapNote(req.Note, 50)
 
-	user.addTransaction(Transaction{
+	user.applyTransaction(newPurchaserBal, Transaction{
 		Note:      "Cosmetic gift: " + entry.Name + " → " + string(toUser.GetUsername()),
 		User:      toUserId,
 		Amount:    totalDeduction,
 		Type:      "cosmetic_gift",
 		Timestamp: now,
-		NewTotal:  newPurchaserBal,
 	})
 
-	creatorUser := getUserById(entry.CreatorId)
-	if len(creatorUser) > 0 {
-		creatorBal := creatorUser.GetCredits()
-		newCreatorBal := roundVal(creatorBal + creatorShare)
-		creatorUser.SetBalance(newCreatorBal)
-		creatorUser.addTransaction(Transaction{
-			Note:      "Cosmetic gift sale: " + entry.Name,
-			User:      userId,
-			Amount:    creatorShare,
-			Type:      "cosmetic_sale",
-			Timestamp: now,
-			NewTotal:  newCreatorBal,
-		})
-	}
-
-	mistUser, mistErr := getAccountByUsername(Username("mist"))
-	if mistErr == nil && len(mistUser) > 0 {
-		mistBal := mistUser.GetCredits()
-		newMistBal := roundVal(mistBal + platformShare)
-		mistUser.SetBalance(newMistBal)
-		if platformShare > 0 {
-			mistUser.addTransaction(Transaction{
-				Note:      "Cosmetic gift platform cut: " + entry.Name,
-				User:      userId,
-				Amount:    platformShare,
-				Type:      "cosmetic_platform",
-				Timestamp: now,
-				NewTotal:  newMistBal,
-			})
-		}
-	}
+	payCosmeticShares(userId, entry.CreatorId, entry.Name, creatorShare, platformShare, true, now)
 
 	entry.Purchases++
 	incrementCosmeticPurchases(cosmeticId)
@@ -201,7 +167,7 @@ func giftCosmetic(c *gin.Context) {
 }
 
 func getMyCosmeticGifts(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	userId := user.GetId()
 
 	received := getCosmeticGiftsByRecipient(userId)

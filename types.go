@@ -592,17 +592,19 @@ func (u User) GetPassword() string {
 }
 
 func (u User) GetPassVersion() int {
-	v := u.Get("sys.passv")
-	switch val := v.(type) {
-	case int:
-		return val
+	return getIntOrDefault(u.Get("sys.passv"), 0)
+}
+
+func parseJSONTimestamp(v any) (int64, error) {
+	switch t := v.(type) {
+	case string:
+		return strconv.ParseInt(t, 10, 64)
 	case float64:
-		return int(val)
+		return int64(t), nil
 	case int64:
-		return int(val)
-	default:
-		return 0
+		return int64(t), nil
 	}
+	return 0, nil
 }
 
 func (u User) GetSystem() string {
@@ -610,7 +612,7 @@ func (u User) GetSystem() string {
 }
 
 func (u User) GetEmail() string {
-	return getStringOrEmpty(u.Get("email"))
+	return u.GetString("email")
 }
 
 func (u User) SetBlocked(blocked []UserId) {
@@ -630,20 +632,20 @@ func (u User) GetBlocked() []UserId {
 	return out
 }
 
-func (u User) GetBlockedUsers() []Username {
-	blocked := u.GetBlocked()
-	out := make([]Username, 0, len(blocked))
-	for _, b := range blocked {
-		idToUserMutex.RLock()
-		user := idToUser[b]
-		idToUserMutex.RUnlock()
-		if user != nil {
+func resolveUsernames(ids []UserId) []Username {
+	out := make([]Username, 0, len(ids))
+	for _, id := range ids {
+		if user := getUserById(id); user != nil {
 			if username := user.GetUsername(); username != "" {
 				out = append(out, username)
 			}
 		}
 	}
 	return out
+}
+
+func (u User) GetBlockedUsers() []Username {
+	return resolveUsernames(u.GetBlocked())
 }
 
 func (u User) AddBlocked(userId UserId) {
@@ -829,19 +831,7 @@ func (u User) GetFriends() []UserId {
 }
 
 func (u User) GetFriendUsers() []Username {
-	friends := getStringSlice(u, "sys.friends")
-	out := make([]Username, 0, len(friends))
-	for _, f := range friends {
-		idToUserMutex.RLock()
-		user := idToUser[UserId(f)]
-		idToUserMutex.RUnlock()
-		if user != nil {
-			if username := user.GetUsername(); username != "" {
-				out = append(out, username)
-			}
-		}
-	}
-	return out
+	return resolveUsernames(u.GetFriends())
 }
 
 func (u User) GetRequests() []UserId {
@@ -871,34 +861,11 @@ func (u User) GetOutgoingRequests() []Username {
 }
 
 func (u User) GetRequestedUsers() []Username {
-	requests := getStringSlice(u, "sys.requests")
-	out := make([]Username, 0, len(requests))
-	for _, r := range requests {
-		idToUserMutex.RLock()
-		user := idToUser[UserId(r)]
-		idToUserMutex.RUnlock()
-		if user != nil {
-			if username := user.GetUsername(); username != "" {
-				out = append(out, username)
-			}
-		}
-	}
-	return out
+	return resolveUsernames(u.GetRequests())
 }
 
 func (u User) GetCreated() int64 {
-	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
-	if created, ok := u["created"]; ok {
-		switch v := created.(type) {
-		case int64:
-			return v
-		case float64:
-			return int64(v)
-		}
-	}
-	return 0
+	return getInt64OrDefault(u.Get("created"), 0)
 }
 
 func (u User) GetNotes() map[UserId]string {
@@ -1143,25 +1110,10 @@ func (u User) GetMaxSize() string {
 
 func (u User) GetTransactions() []Transaction {
 	raw := u.Get("sys.transactions")
-	if raw == nil {
-		return nil
-	}
-
 	if txs, ok := raw.([]Transaction); ok {
 		return txs
 	}
-
-	b, err := json.Marshal(raw)
-	if err != nil {
-		return nil
-	}
-
-	var txs []Transaction
-	if err := json.Unmarshal(b, &txs); err != nil {
-		return nil
-	}
-
-	return txs
+	return reJSON(raw, []Transaction(nil))
 }
 
 func (u User) addTransaction(tx Transaction) {
@@ -1181,6 +1133,12 @@ func (u User) addTransaction(tx Transaction) {
 		txs = txs[:benefits.Max_Transaction_History]
 	}
 	u.Set("sys.transactions", txs)
+}
+
+func (u User) applyTransaction(newBalance float64, tx Transaction) {
+	u.SetBalance(newBalance)
+	tx.NewTotal = newBalance
+	u.addTransaction(tx)
 }
 
 func (u User) SetLogins(logins []Login) {
@@ -1736,18 +1694,11 @@ func (r *Reply) UnmarshalJSON(data []byte) error {
 	// Handle timestamp field that can be string or number
 	var timestamp int64
 	if timestampVal, exists := rawData["timestamp"]; exists {
-		switch v := timestampVal.(type) {
-		case string:
-			var err error
-			timestamp, err = strconv.ParseInt(v, 10, 64)
-			if err != nil {
-				return err
-			}
-		case float64:
-			timestamp = int64(v)
-		case int64:
-			timestamp = v
+		ts, err := parseJSONTimestamp(timestampVal)
+		if err != nil {
+			return err
 		}
+		timestamp = ts
 	}
 
 	// Define a temporary struct without timestamp to unmarshal the rest
@@ -2070,18 +2021,7 @@ func (u User) GetStandingHistory() []StandingHistoryEntry {
 }
 
 func (u User) GetStandingRecoverAt() int64 {
-	recoverAt := u.Get("sys.standing_recover_at")
-	if recoverAt != nil {
-		switch v := recoverAt.(type) {
-		case int64:
-			return v
-		case float64:
-			return int64(v)
-		case int:
-			return int64(v)
-		}
-	}
-	return 0
+	return getInt64OrDefault(u.Get("sys.standing_recover_at"), 0)
 }
 
 func standingRank(level StandingLevel) int {
@@ -2173,18 +2113,11 @@ func (p *Post) UnmarshalJSON(data []byte) error {
 	// Handle timestamp field that can be string or number
 	var timestamp int64
 	if timestampVal, exists := rawData["timestamp"]; exists {
-		switch v := timestampVal.(type) {
-		case string:
-			var err error
-			timestamp, err = strconv.ParseInt(v, 10, 64)
-			if err != nil {
-				return err
-			}
-		case float64:
-			timestamp = int64(v)
-		case int64:
-			timestamp = v
+		ts, err := parseJSONTimestamp(timestampVal)
+		if err != nil {
+			return err
 		}
+		timestamp = ts
 	}
 
 	// Define a temporary struct without timestamp to unmarshal the rest

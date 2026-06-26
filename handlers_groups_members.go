@@ -10,28 +10,18 @@ import (
 )
 
 func sendGroupInvite(c *gin.Context) {
-	user := c.MustGet("user").(*User)
-	groupTag := c.Param("grouptag")
-
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	group, ok := getGroupByTag(groupTag)
+	user := currentUser(c)
+	group, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	if !hasPermission(user.GetId(), groupTag, "groups.members.invite") && group.OwnerUserId != user.GetId() {
-		c.JSON(403, gin.H{"error": "You don't have permission to invite members"})
+	if !requireGroupPermOrOwner(c, group, user.GetId(), groupTag, "groups.members.invite", "You don't have permission to invite members") {
 		return
 	}
 
 	targetUsername := c.Query("username")
-	if targetUsername == "" {
-		c.JSON(400, gin.H{"error": "Username is required"})
+	if !requireField(c, targetUsername, "Username is required") {
 		return
 	}
 
@@ -48,12 +38,9 @@ func sendGroupInvite(c *gin.Context) {
 		return
 	}
 
-	members := getGroupMembers(groupTag)
-	for _, member := range members {
-		if member.UserId == targetUserId {
-			c.JSON(400, gin.H{"error": "User is already a member of this group"})
-			return
-		}
+	if isGroupMember(groupTag, targetUserId) {
+		c.JSON(400, gin.H{"error": "User is already a member of this group"})
+		return
 	}
 
 	groupsDataMutex.RLock()
@@ -115,18 +102,16 @@ func sendGroupInvite(c *gin.Context) {
 }
 
 func acceptGroupInvite(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	groupTag := c.Param("grouptag")
 	inviteId := c.Param("inviteid")
 
-	if groupTag == "" || inviteId == "" {
-		c.JSON(400, gin.H{"error": "Group tag and invite ID are required"})
+	if !requireFields(c, "Group tag and invite ID are required", groupTag, inviteId) {
 		return
 	}
 
-	group, ok := getGroupByTag(groupTag)
+	group, ok := getGroupOr404(c, groupTag)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
@@ -174,14 +159,12 @@ func acceptGroupInvite(c *gin.Context) {
 			c.JSON(400, gin.H{"error": "Insufficient funds to join this group", "required": group.EntryFee, "available": userCredits})
 			return
 		}
-		user.SetBalance(roundVal(userCredits - group.EntryFee))
-		user.addTransaction(Transaction{
+		user.applyTransaction(roundVal(userCredits-group.EntryFee), Transaction{
 			Note:      "Entry fee for group " + groupTag,
 			User:      UserId(""),
 			Amount:    group.EntryFee,
 			Type:      "group_entry_fee",
 			Timestamp: time.Now().UnixMilli(),
-			NewTotal:  roundVal(userCredits - group.EntryFee),
 		})
 		data.Group.CreditsBalance = roundVal(data.Group.CreditsBalance + group.EntryFee)
 		go saveUsers()
@@ -212,18 +195,15 @@ func acceptGroupInvite(c *gin.Context) {
 }
 
 func declineGroupInvite(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	groupTag := c.Param("grouptag")
 	inviteId := c.Param("inviteid")
 
-	if groupTag == "" || inviteId == "" {
-		c.JSON(400, gin.H{"error": "Group tag and invite ID are required"})
+	if !requireFields(c, "Group tag and invite ID are required", groupTag, inviteId) {
 		return
 	}
 
-	_, ok := getGroupByTag(groupTag)
-	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
+	if !requireGroupExists(c, groupTag) {
 		return
 	}
 
@@ -256,23 +236,20 @@ func declineGroupInvite(c *gin.Context) {
 }
 
 func revokeGroupInvite(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	groupTag := c.Param("grouptag")
 	inviteId := c.Param("inviteid")
 
-	if groupTag == "" || inviteId == "" {
-		c.JSON(400, gin.H{"error": "Group tag and invite ID are required"})
+	if !requireFields(c, "Group tag and invite ID are required", groupTag, inviteId) {
 		return
 	}
 
-	group, ok := getGroupByTag(groupTag)
+	group, ok := getGroupOr404(c, groupTag)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	if !hasPermission(user.GetId(), groupTag, "groups.members.invite") && group.OwnerUserId != user.GetId() {
-		c.JSON(403, gin.H{"error": "You don't have permission to revoke invites"})
+	if !requireGroupPermOrOwner(c, group, user.GetId(), groupTag, "groups.members.invite", "You don't have permission to revoke invites") {
 		return
 	}
 
@@ -307,22 +284,13 @@ func revokeGroupInvite(c *gin.Context) {
 }
 
 func getGroupInvites(c *gin.Context) {
-	user := c.MustGet("user").(*User)
-	groupTag := c.Param("grouptag")
-
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	group, ok := getGroupByTag(groupTag)
+	user := currentUser(c)
+	group, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	if !hasPermission(user.GetId(), groupTag, "groups.members.invite") && group.OwnerUserId != user.GetId() {
-		c.JSON(403, gin.H{"error": "You don't have permission to view invites"})
+	if !requireGroupPermOrOwner(c, group, user.GetId(), groupTag, "groups.members.invite", "You don't have permission to view invites") {
 		return
 	}
 
@@ -345,7 +313,7 @@ func getGroupInvites(c *gin.Context) {
 }
 
 func getMyGroupInvites(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	userId := user.GetId()
 
 	groupsDataMutex.RLock()
@@ -364,23 +332,20 @@ func getMyGroupInvites(c *gin.Context) {
 }
 
 func kickGroupMember(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	groupTag := c.Param("grouptag")
 	targetUserId := c.Param("userid")
 
-	if groupTag == "" || targetUserId == "" {
-		c.JSON(400, gin.H{"error": "Group tag and user ID are required"})
+	if !requireFields(c, "Group tag and user ID are required", groupTag, targetUserId) {
 		return
 	}
 
-	group, ok := getGroupByTag(groupTag)
+	group, ok := getGroupOr404(c, groupTag)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	if !hasPermission(user.GetId(), groupTag, "groups.members.remove") && group.OwnerUserId != user.GetId() {
-		c.JSON(403, gin.H{"error": "You don't have permission to kick members"})
+	if !requireGroupPermOrOwner(c, group, user.GetId(), groupTag, "groups.members.remove", "You don't have permission to kick members") {
 		return
 	}
 
@@ -428,23 +393,11 @@ func kickGroupMember(c *gin.Context) {
 	groupsData[groupTag] = data
 	go saveGroupData(groupTag)
 
-	go func() {
-		targetUser, err := getAccountByUserId(UserId(targetUserId))
-		if err == nil {
-			addUserEvent(UserId(targetUserId), "group_kicked", map[string]any{
-				"group_tag":  groupTag,
-				"group_name": group.Name,
-				"kicked_by":  string(user.GetUsername()),
-			})
-			if isNotifyAllowed(targetUser, "group_"+groupTag, user.GetId()) {
-				sendPushNotificationToUser(targetUser, *user, NotificationRequest{
-					Source: "group_" + groupTag,
-					Title:  "Removed from Group",
-					Body:   fmt.Sprintf("You have been removed from %s", group.Name),
-				})
-			}
-		}
-	}()
+	notifyGroupEvent(UserId(targetUserId), user, groupTag, "group_kicked", map[string]any{
+		"group_tag":  groupTag,
+		"group_name": group.Name,
+		"kicked_by":  string(user.GetUsername()),
+	}, "Removed from Group", fmt.Sprintf("You have been removed from %s", group.Name))
 
 	log.Printf("User %s kicked %s from group %s", user.GetUsername(), targetUserId, groupTag)
 
@@ -457,29 +410,25 @@ func kickGroupMember(c *gin.Context) {
 }
 
 func banGroupMember(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	groupTag := c.Param("grouptag")
 	targetUserId := c.Param("userid")
 
-	if groupTag == "" || targetUserId == "" {
-		c.JSON(400, gin.H{"error": "Group tag and user ID are required"})
+	if !requireFields(c, "Group tag and user ID are required", groupTag, targetUserId) {
 		return
 	}
 
-	group, ok := getGroupByTag(groupTag)
+	group, ok := getGroupOr404(c, groupTag)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	if !hasPermission(user.GetId(), groupTag, "groups.members.ban") && group.OwnerUserId != user.GetId() {
-		c.JSON(403, gin.H{"error": "You don't have permission to ban members"})
+	if !requireGroupPermOrOwner(c, group, user.GetId(), groupTag, "groups.members.ban", "You don't have permission to ban members") {
 		return
 	}
 
 	reason := c.Query("reason")
-	if len(reason) > 200 {
-		c.JSON(400, gin.H{"error": "Reason length exceeded (max 200)"})
+	if !requireMaxLen(c, reason, 200, "Reason length exceeded (max 200)") {
 		return
 	}
 
@@ -547,24 +496,12 @@ func banGroupMember(c *gin.Context) {
 	groupsData[groupTag] = data
 	go saveGroupData(groupTag)
 
-	go func() {
-		targetUser, err := getAccountByUserId(UserId(targetUserId))
-		if err == nil {
-			addUserEvent(UserId(targetUserId), "group_banned", map[string]any{
-				"group_tag":  groupTag,
-				"group_name": group.Name,
-				"banned_by":  string(user.GetUsername()),
-				"reason":     reason,
-			})
-			if isNotifyAllowed(targetUser, "group_"+groupTag, user.GetId()) {
-				sendPushNotificationToUser(targetUser, *user, NotificationRequest{
-					Source: "group_" + groupTag,
-					Title:  "Banned from Group",
-					Body:   fmt.Sprintf("You have been banned from %s", group.Name),
-				})
-			}
-		}
-	}()
+	notifyGroupEvent(UserId(targetUserId), user, groupTag, "group_banned", map[string]any{
+		"group_tag":  groupTag,
+		"group_name": group.Name,
+		"banned_by":  string(user.GetUsername()),
+		"reason":     reason,
+	}, "Banned from Group", fmt.Sprintf("You have been banned from %s", group.Name))
 
 	log.Printf("User %s banned %s from group %s", user.GetUsername(), targetUserId, groupTag)
 
@@ -580,23 +517,20 @@ func banGroupMember(c *gin.Context) {
 }
 
 func unbanGroupMember(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	groupTag := c.Param("grouptag")
 	targetUserId := c.Param("userid")
 
-	if groupTag == "" || targetUserId == "" {
-		c.JSON(400, gin.H{"error": "Group tag and user ID are required"})
+	if !requireFields(c, "Group tag and user ID are required", groupTag, targetUserId) {
 		return
 	}
 
-	group, ok := getGroupByTag(groupTag)
+	group, ok := getGroupOr404(c, groupTag)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	if !hasPermission(user.GetId(), groupTag, "groups.members.ban") && group.OwnerUserId != user.GetId() {
-		c.JSON(403, gin.H{"error": "You don't have permission to unban members"})
+	if !requireGroupPermOrOwner(c, group, user.GetId(), groupTag, "groups.members.ban", "You don't have permission to unban members") {
 		return
 	}
 
@@ -631,22 +565,13 @@ func unbanGroupMember(c *gin.Context) {
 }
 
 func getGroupBans(c *gin.Context) {
-	user := c.MustGet("user").(*User)
-	groupTag := c.Param("grouptag")
-
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	group, ok := getGroupByTag(groupTag)
+	user := currentUser(c)
+	group, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	if !hasPermission(user.GetId(), groupTag, "groups.members.ban") && group.OwnerUserId != user.GetId() {
-		c.JSON(403, gin.H{"error": "You don't have permission to view bans"})
+	if !requireGroupPermOrOwner(c, group, user.GetId(), groupTag, "groups.members.ban", "You don't have permission to view bans") {
 		return
 	}
 
@@ -670,14 +595,11 @@ func checkGroupBan(c *gin.Context) {
 	groupTag := c.Param("grouptag")
 	targetUserId := c.Param("userid")
 
-	if groupTag == "" || targetUserId == "" {
-		c.JSON(400, gin.H{"error": "Group tag and user ID are required"})
+	if !requireFields(c, "Group tag and user ID are required", groupTag, targetUserId) {
 		return
 	}
 
-	_, ok := getGroupByTag(groupTag)
-	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
+	if !requireGroupExists(c, groupTag) {
 		return
 	}
 
@@ -700,17 +622,9 @@ func checkGroupBan(c *gin.Context) {
 }
 
 func requestToJoinGroup(c *gin.Context) {
-	user := c.MustGet("user").(*User)
-	groupTag := c.Param("grouptag")
-
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	group, ok := getGroupByTag(groupTag)
+	user := currentUser(c)
+	group, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
@@ -726,12 +640,9 @@ func requestToJoinGroup(c *gin.Context) {
 
 	userId := user.GetId()
 
-	members := getGroupMembers(groupTag)
-	for _, member := range members {
-		if member.UserId == userId {
-			c.JSON(400, gin.H{"error": "You are already a member of this group"})
-			return
-		}
+	if isGroupMember(groupTag, userId) {
+		c.JSON(400, gin.H{"error": "You are already a member of this group"})
+		return
 	}
 
 	groupsDataMutex.Lock()
@@ -765,8 +676,7 @@ func requestToJoinGroup(c *gin.Context) {
 	}
 
 	message := c.Query("message")
-	if len(message) > 200 {
-		c.JSON(400, gin.H{"error": "Message length exceeded (max 200)"})
+	if !requireMaxLen(c, message, 200, "Message length exceeded (max 200)") {
 		return
 	}
 
@@ -790,14 +700,7 @@ func requestToJoinGroup(c *gin.Context) {
 				continue
 			}
 			if hasPermission(member.UserId, groupTag, "groups.members.invite") || member.UserId == group.OwnerUserId {
-				targetUser := member.UserId.User()
-				if isNotifyAllowed(targetUser, "group_"+groupTag, user.GetId()) {
-					sendPushNotificationToUser(targetUser, *user, NotificationRequest{
-						Source: "group_" + groupTag,
-						Title:  "Join Request",
-						Body:   fmt.Sprintf("%s requested to join %s", user.GetUsername(), group.Name),
-					})
-				}
+				notifyGroupMember(member.UserId.User(), user, groupTag, "Join Request", fmt.Sprintf("%s requested to join %s", user.GetUsername(), group.Name))
 			}
 		}
 	}()
@@ -806,22 +709,13 @@ func requestToJoinGroup(c *gin.Context) {
 }
 
 func getGroupJoinRequests(c *gin.Context) {
-	user := c.MustGet("user").(*User)
-	groupTag := c.Param("grouptag")
-
-	if groupTag == "" {
-		c.JSON(400, gin.H{"error": "Group tag is required"})
-		return
-	}
-
-	group, ok := getGroupByTag(groupTag)
+	user := currentUser(c)
+	group, groupTag, ok := resolveGroup(c)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	if !hasPermission(user.GetId(), groupTag, "groups.members.invite") && group.OwnerUserId != user.GetId() {
-		c.JSON(403, gin.H{"error": "You don't have permission to view join requests"})
+	if !requireGroupPermOrOwner(c, group, user.GetId(), groupTag, "groups.members.invite", "You don't have permission to view join requests") {
 		return
 	}
 
@@ -844,23 +738,20 @@ func getGroupJoinRequests(c *gin.Context) {
 }
 
 func acceptGroupJoinRequest(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	groupTag := c.Param("grouptag")
 	requestId := c.Param("requestid")
 
-	if groupTag == "" || requestId == "" {
-		c.JSON(400, gin.H{"error": "Group tag and request ID are required"})
+	if !requireFields(c, "Group tag and request ID are required", groupTag, requestId) {
 		return
 	}
 
-	group, ok := getGroupByTag(groupTag)
+	group, ok := getGroupOr404(c, groupTag)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	if !hasPermission(user.GetId(), groupTag, "groups.members.invite") && group.OwnerUserId != user.GetId() {
-		c.JSON(403, gin.H{"error": "You don't have permission to accept join requests"})
+	if !requireGroupPermOrOwner(c, group, user.GetId(), groupTag, "groups.members.invite", "You don't have permission to accept join requests") {
 		return
 	}
 
@@ -915,14 +806,12 @@ func acceptGroupJoinRequest(c *gin.Context) {
 			c.JSON(400, gin.H{"error": "User has insufficient funds to join this group", "required": group.EntryFee, "available": userCredits})
 			return
 		}
-		targetUser.SetBalance(roundVal(userCredits - group.EntryFee))
-		targetUser.addTransaction(Transaction{
+		targetUser.applyTransaction(roundVal(userCredits-group.EntryFee), Transaction{
 			Note:      "Entry fee for group " + groupTag,
 			User:      UserId(""),
 			Amount:    group.EntryFee,
 			Type:      "group_entry_fee",
 			Timestamp: time.Now().UnixMilli(),
-			NewTotal:  roundVal(userCredits - group.EntryFee),
 		})
 		data.Group.CreditsBalance = roundVal(data.Group.CreditsBalance + group.EntryFee)
 		go saveUsers()
@@ -944,22 +833,10 @@ func acceptGroupJoinRequest(c *gin.Context) {
 	groupsData[groupTag] = data
 	go saveGroupData(groupTag)
 
-	go func() {
-		targetUser, err := getAccountByUserId(targetUserId)
-		if err == nil {
-			addUserEvent(targetUserId, "group_request_accepted", map[string]any{
-				"group_tag":  groupTag,
-				"group_name": group.Name,
-			})
-			if isNotifyAllowed(targetUser, "group_"+groupTag, user.GetId()) {
-				sendPushNotificationToUser(targetUser, *user, NotificationRequest{
-					Source: "group_" + groupTag,
-					Title:  "Join Request Accepted",
-					Body:   fmt.Sprintf("Your request to join %s has been accepted", group.Name),
-				})
-			}
-		}
-	}()
+	notifyGroupEvent(targetUserId, user, groupTag, "group_request_accepted", map[string]any{
+		"group_tag":  groupTag,
+		"group_name": group.Name,
+	}, "Join Request Accepted", fmt.Sprintf("Your request to join %s has been accepted", group.Name))
 
 	netGroup := data.Group.ToNet()
 	netGroup.MemberCount = len(data.Members)
@@ -970,23 +847,20 @@ func acceptGroupJoinRequest(c *gin.Context) {
 }
 
 func declineGroupJoinRequest(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	groupTag := c.Param("grouptag")
 	requestId := c.Param("requestid")
 
-	if groupTag == "" || requestId == "" {
-		c.JSON(400, gin.H{"error": "Group tag and request ID are required"})
+	if !requireFields(c, "Group tag and request ID are required", groupTag, requestId) {
 		return
 	}
 
-	group, ok := getGroupByTag(groupTag)
+	group, ok := getGroupOr404(c, groupTag)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
-	if !hasPermission(user.GetId(), groupTag, "groups.members.invite") && group.OwnerUserId != user.GetId() {
-		c.JSON(403, gin.H{"error": "You don't have permission to decline join requests"})
+	if !requireGroupPermOrOwner(c, group, user.GetId(), groupTag, "groups.members.invite", "You don't have permission to decline join requests") {
 		return
 	}
 
@@ -1015,46 +889,32 @@ func declineGroupJoinRequest(c *gin.Context) {
 	groupsData[groupTag] = data
 	go saveGroupData(groupTag)
 
-	go func() {
-		targetUserId := data.JoinRequests[0].UserId // find the one we just declined
-		for _, req := range data.JoinRequests {
-			if req.Id == requestId {
-				targetUserId = req.UserId
-				break
-			}
+	targetUserId := data.JoinRequests[0].UserId // find the one we just declined
+	for _, req := range data.JoinRequests {
+		if req.Id == requestId {
+			targetUserId = req.UserId
+			break
 		}
-		targetUser, err := getAccountByUserId(targetUserId)
-		if err == nil {
-			addUserEvent(targetUserId, "group_request_declined", map[string]any{
-				"group_tag":  groupTag,
-				"group_name": group.Name,
-			})
-			if isNotifyAllowed(targetUser, "group_"+groupTag, user.GetId()) {
-				sendPushNotificationToUser(targetUser, *user, NotificationRequest{
-					Source: "group_" + groupTag,
-					Title:  "Join Request Declined",
-					Body:   fmt.Sprintf("Your request to join %s has been declined", group.Name),
-				})
-			}
-		}
-	}()
+	}
+	notifyGroupEvent(targetUserId, user, groupTag, "group_request_declined", map[string]any{
+		"group_tag":  groupTag,
+		"group_name": group.Name,
+	}, "Join Request Declined", fmt.Sprintf("Your request to join %s has been declined", group.Name))
 
 	c.JSON(200, gin.H{"message": "Join request declined"})
 }
 
 func transferGroupOwnership(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 	groupTag := c.Param("grouptag")
 	targetUserId := c.Param("userid")
 
-	if groupTag == "" || targetUserId == "" {
-		c.JSON(400, gin.H{"error": "Group tag and user ID are required"})
+	if !requireFields(c, "Group tag and user ID are required", groupTag, targetUserId) {
 		return
 	}
 
-	group, ok := getGroupByTag(groupTag)
+	group, ok := getGroupOr404(c, groupTag)
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
 		return
 	}
 
@@ -1123,23 +983,11 @@ func transferGroupOwnership(c *gin.Context) {
 	groupsData[groupTag] = data
 	go saveGroupData(groupTag)
 
-	go func() {
-		targetUser, err := getAccountByUserId(UserId(targetUserId))
-		if err == nil {
-			addUserEvent(UserId(targetUserId), "group_ownership_transferred", map[string]any{
-				"group_tag":  groupTag,
-				"group_name": group.Name,
-				"from":       string(user.GetUsername()),
-			})
-			if isNotifyAllowed(targetUser, "group_"+groupTag, user.GetId()) {
-				sendPushNotificationToUser(targetUser, *user, NotificationRequest{
-					Source: "group_" + groupTag,
-					Title:  "Group Ownership Transferred",
-					Body:   fmt.Sprintf("You are now the owner of %s", group.Name),
-				})
-			}
-		}
-	}()
+	notifyGroupEvent(UserId(targetUserId), user, groupTag, "group_ownership_transferred", map[string]any{
+		"group_tag":  groupTag,
+		"group_name": group.Name,
+		"from":       string(user.GetUsername()),
+	}, "Group Ownership Transferred", fmt.Sprintf("You are now the owner of %s", group.Name))
 
 	log.Printf("Group %s ownership transferred from %s to %s", groupTag, user.GetUsername(), targetUserId)
 
@@ -1155,75 +1003,24 @@ func getGroupMemberInfo(c *gin.Context) {
 	groupTag := c.Param("grouptag")
 	targetUserId := c.Param("userid")
 
-	if groupTag == "" || targetUserId == "" {
-		c.JSON(400, gin.H{"error": "Group tag and user ID are required"})
+	if !requireFields(c, "Group tag and user ID are required", groupTag, targetUserId) {
 		return
 	}
 
-	_, ok := getGroupByTag(groupTag)
+	if !requireGroupExists(c, groupTag) {
+		return
+	}
+
+	member, ok := findGroupMember(groupTag, UserId(targetUserId))
 	if !ok {
-		c.JSON(404, gin.H{"error": "Group not found"})
+		c.JSON(404, gin.H{"error": "User is not a member of this group"})
 		return
 	}
 
-	members := getGroupMembers(groupTag)
-	for _, member := range members {
-		if member.UserId == UserId(targetUserId) {
-			rolesMap := getGroupRolesMap(groupTag)
-			roles := make([]GroupRole, 0)
-			for _, roleId := range member.RoleIds {
-				if role, ok := rolesMap[roleId]; ok {
-					if role.Name == "Owner" {
-						ownerRole := role
-						ownerRole.Permissions = allGroupPermissions()
-						roles = append(roles, ownerRole)
-					} else {
-						roles = append(roles, role)
-					}
-				}
-			}
-
-			permissionsMap := make(map[string]bool)
-			for _, roleId := range member.RoleIds {
-				if role, ok := rolesMap[roleId]; ok {
-					if role.Name == "Owner" {
-						for _, perm := range allGroupPermissions() {
-							permissionsMap[perm] = true
-						}
-					} else {
-						for _, perm := range role.Permissions {
-							permissionsMap[perm] = true
-						}
-					}
-				}
-			}
-			permissions := make([]string, 0, len(permissionsMap))
-			for perm := range permissionsMap {
-				permissions = append(permissions, perm)
-			}
-
-			benefitsMap := make(map[string]bool)
-			for _, roleId := range member.RoleIds {
-				if role, ok := rolesMap[roleId]; ok {
-					for _, benefit := range role.Benefits {
-						benefitsMap[benefit] = true
-					}
-				}
-			}
-			benefits := make([]string, 0, len(benefitsMap))
-			for benefit := range benefitsMap {
-				benefits = append(benefits, benefit)
-			}
-
-			c.JSON(200, gin.H{
-				"member":      member.ToNet(),
-				"roles":       roles,
-				"permissions": permissions,
-				"benefits":    benefits,
-			})
-			return
-		}
-	}
-
-	c.JSON(404, gin.H{"error": "User is not a member of this group"})
+	c.JSON(200, gin.H{
+		"member":      member.ToNet(),
+		"roles":       memberRoles(groupTag, member),
+		"permissions": memberPermissions(groupTag, member),
+		"benefits":    memberBenefits(groupTag, member),
+	})
 }

@@ -127,7 +127,7 @@ func createPost(c *gin.Context) {
 		return
 	}
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	content := c.Query("content")
 
@@ -319,8 +319,7 @@ func lookupPostUnlocked(id string) *Post {
 
 func getPost(c *gin.Context) {
 	id := c.Query("id")
-	if id == "" {
-		c.JSON(400, gin.H{"error": "Post ID is required"})
+	if !requireField(c, id, "Post ID is required") {
 		return
 	}
 
@@ -356,17 +355,15 @@ func getPost(c *gin.Context) {
 func replyToPost(c *gin.Context) {
 	// Rate limiting check
 
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	postID := c.Query("id")
-	if postID == "" {
-		c.JSON(400, gin.H{"error": "Post ID is required"})
+	if !requireField(c, postID, "Post ID is required") {
 		return
 	}
 
 	content := c.Query("content")
-	if content == "" {
-		c.JSON(400, gin.H{"error": "Content is required"})
+	if !requireField(c, content, "Content is required") {
 		return
 	}
 
@@ -421,15 +418,14 @@ func replyToPost(c *gin.Context) {
 }
 
 func deletePost(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	postID := c.Query("id")
-	if postID == "" {
-		c.JSON(400, gin.H{"error": "Post ID is required"})
+	if !requireField(c, postID, "Post ID is required") {
 		return
 	}
 
-	isMist := user.GetUsername().ToLower() == "mist"
+	isMist := isHardcodedAdmin(user.GetUsername())
 	userId := user.GetId()
 
 	postsMutex.Lock()
@@ -471,17 +467,15 @@ func deletePost(c *gin.Context) {
 }
 
 func editPost(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	postID := c.Query("id")
-	if postID == "" {
-		c.JSON(400, gin.H{"error": "Post ID is required"})
+	if !requireField(c, postID, "Post ID is required") {
 		return
 	}
 
 	content := c.Query("content")
-	if content == "" {
-		c.JSON(400, gin.H{"error": "Content is required"})
+	if !requireField(c, content, "Content is required") {
 		return
 	}
 
@@ -495,7 +489,6 @@ func editPost(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Content exceeds " + strconv.Itoa(chars) + " character limit"})
 		return
 	}
-
 
 	targetPost := getPostById(postID)
 	if targetPost == nil {
@@ -539,17 +532,15 @@ func editPost(c *gin.Context) {
 }
 
 func ratePost(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	postID := c.Query("id")
-	if postID == "" {
-		c.JSON(400, gin.H{"error": "Post ID is required"})
+	if !requireField(c, postID, "Post ID is required") {
 		return
 	}
 
 	ratingStr := c.Query("rating")
-	if ratingStr == "" {
-		c.JSON(400, gin.H{"error": "Rating is required"})
+	if !requireField(c, ratingStr, "Rating is required") {
 		return
 	}
 
@@ -621,11 +612,10 @@ func ratePost(c *gin.Context) {
 }
 
 func repost(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	postID := c.Query("id")
-	if postID == "" {
-		c.JSON(400, gin.H{"error": "Post ID is required"})
+	if !requireField(c, postID, "Post ID is required") {
 		return
 	}
 
@@ -704,11 +694,10 @@ func repost(c *gin.Context) {
 }
 
 func pinPost(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	postID := c.Query("id")
-	if postID == "" {
-		c.JSON(400, gin.H{"error": "Post ID is required"})
+	if !requireField(c, postID, "Post ID is required") {
 		return
 	}
 
@@ -764,11 +753,10 @@ func pinPost(c *gin.Context) {
 }
 
 func unpinPost(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	postID := c.Query("id")
-	if postID == "" {
-		c.JSON(400, gin.H{"error": "Post ID is required"})
+	if !requireField(c, postID, "Post ID is required") {
 		return
 	}
 
@@ -810,18 +798,11 @@ func unpinPost(c *gin.Context) {
 
 func searchPosts(c *gin.Context) {
 	query := c.Query("q")
-	if query == "" {
-		c.JSON(400, gin.H{"error": "Search query is required"})
+	if !requireField(c, query, "Search query is required") {
 		return
 	}
 
-	limitStr := c.DefaultQuery("limit", "20")
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 {
-		limit = 20
-	} else {
-		limit = clamp(limit, 1, 20)
-	}
+	limit := queryLimit(c, 20, 20)
 
 	queryLower := strings.ToLower(query)
 
@@ -848,13 +829,7 @@ func searchPosts(c *gin.Context) {
 }
 
 func getTopPosts(c *gin.Context) {
-	limitStr := c.DefaultQuery("limit", "50")
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 {
-		limit = 50
-	} else {
-		limit = clamp(limit, 1, 50)
-	}
+	limit := queryLimit(c, 50, 50)
 
 	timePeriodStr := c.DefaultQuery("time_period", "24")
 	timePeriod, err := strconv.Atoi(timePeriodStr)
@@ -916,13 +891,7 @@ func loadEnvFile() {
 }
 
 func getFeed(c *gin.Context) {
-	limitStr := c.DefaultQuery("limit", "100")
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 {
-		limit = 100
-	} else {
-		limit = clamp(limit, 1, 100)
-	}
+	limit := queryLimit(c, 100, 100)
 
 	offsetStr := c.DefaultQuery("offset", "0")
 	offset, err := strconv.Atoi(offsetStr)
@@ -971,17 +940,10 @@ func getFeed(c *gin.Context) {
 }
 
 func getFollowingFeed(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+	user := currentUser(c)
 
 	maxLimit := clawFeedLimit(user)
-	limitStr := c.DefaultQuery("limit", "100")
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 {
-		limit = 100
-	}
-	if limit > maxLimit {
-		limit = maxLimit
-	}
+	limit := queryLimit(c, 100, maxLimit)
 
 	userId := user.GetId()
 
