@@ -7,6 +7,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var hardcodedAdmins = map[string]bool{
+	"mist": true,
+}
+
+func isHardcodedAdmin(username Username) bool {
+	return hardcodedAdmins[strings.ToLower(string(username))]
+}
+
 func authenticateWithKey(key string) *User {
 	idToUserMutex.RLock()
 	idx, ok := keyToUserIdx[key]
@@ -69,6 +77,25 @@ func getKeyNextBilling(userId UserId, key string) int64 {
 	default:
 		return 0
 	}
+}
+
+func setKeyNextBilling(userId UserId, key string, nextBilling int64) bool {
+	keysMutex.Lock()
+	idx, ok := keyStringToIdx[key]
+	if !ok {
+		keysMutex.Unlock()
+		return false
+	}
+	userData, exists := keys[idx].Users[userId]
+	if !exists {
+		keysMutex.Unlock()
+		return false
+	}
+	userData.NextBilling = nextBilling
+	keys[idx].Users[userId] = userData
+	keysMutex.Unlock()
+	go saveKeys()
+	return true
 }
 
 func extractAdminToken(authHeader string) string {

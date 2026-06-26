@@ -34,6 +34,7 @@ const (
 	maxCosmeticDescriptionLen = 500
 	maxCosmeticImageUrlLen    = 500
 	maxOwnedCosmeticsPerUser  = 200
+	memberCosmeticDiscount    = 0.20
 )
 
 var cosmeticIdRe = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
@@ -427,20 +428,27 @@ func purchaseCosmetic(c *gin.Context) {
 		return
 	}
 
+	creatorShare := roundVal(entry.Price * (entry.CreatorPct / 100.0))
+	platformShare := roundVal(entry.Price - creatorShare)
+
+	effectivePrice := entry.Price
+	if tierRank(user.GetSubscription().Tier) >= 1 {
+		effectivePrice = roundVal(entry.Price * (1 - memberCosmeticDiscount))
+		creatorShare = effectivePrice
+		platformShare = 0
+	}
+
 	userCredits := user.GetCredits()
-	if userCredits < entry.Price {
+	if userCredits < effectivePrice {
 		c.JSON(400, gin.H{
 			"error":     "Insufficient credits",
-			"required":  entry.Price,
+			"required":  effectivePrice,
 			"available": userCredits,
 		})
 		return
 	}
 
-	creatorShare := roundVal(entry.Price * (entry.CreatorPct / 100.0))
-	platformShare := roundVal(entry.Price - creatorShare)
-
-	newPurchaserBal := roundVal(userCredits - entry.Price)
+	newPurchaserBal := roundVal(userCredits - effectivePrice)
 	if newPurchaserBal < 0 {
 		c.JSON(400, gin.H{"error": "Insufficient credits"})
 		return
@@ -450,7 +458,7 @@ func purchaseCosmetic(c *gin.Context) {
 	user.addTransaction(Transaction{
 		Note:      "Cosmetic purchase: " + entry.Name,
 		User:      entry.CreatorId,
-		Amount:    entry.Price,
+		Amount:    effectivePrice,
 		Type:      "cosmetic_purchase",
 		Timestamp: now,
 		NewTotal:  newPurchaserBal,
@@ -502,7 +510,8 @@ func purchaseCosmetic(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"message":        "Cosmetic purchased successfully",
 		"cosmetic":       entry.ToPublic(),
-		"price":          entry.Price,
+		"price":          effectivePrice,
+		"discount":       roundVal(entry.Price - effectivePrice),
 		"creator_share":  creatorShare,
 		"platform_share": platformShare,
 		"new_total":      newPurchaserBal,

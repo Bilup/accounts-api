@@ -54,7 +54,13 @@ func followUser(c *gin.Context) {
 	data.Followers = append(data.Followers, currentId)
 	followersData[targetId] = data
 	go saveFollowers()
+	followersCount := len(data.Followers)
 	followersMutex.Unlock()
+
+	go broadcastClawEvent("followers", map[string]any{
+		"username":  targetUsername,
+		"followers": followersCount,
+	})
 
 	addUserEvent(targetId, "follow", map[string]any{
 		"follower": string(currentId),

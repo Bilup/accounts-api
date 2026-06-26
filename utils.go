@@ -13,7 +13,6 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -138,6 +137,46 @@ func requireStanding(minLevel StandingLevel) gin.HandlerFunc {
 	}
 }
 
+func requireNetworkAdmin(c *gin.Context) {
+	if isAdmin(c) {
+		c.Next()
+		return
+	}
+	userVal, exists := c.Get("user")
+	if !exists {
+		c.JSON(403, gin.H{"error": "Authentication required"})
+		c.Abort()
+		return
+	}
+	user, ok := userVal.(*User)
+	if !ok || !user.IsNetworkAdmin() {
+		c.JSON(403, gin.H{"error": "Admin privileges required"})
+		c.Abort()
+		return
+	}
+	c.Next()
+}
+
+func requireModerator(c *gin.Context) {
+	if isAdmin(c) {
+		c.Next()
+		return
+	}
+	userVal, exists := c.Get("user")
+	if !exists {
+		c.JSON(403, gin.H{"error": "Authentication required"})
+		c.Abort()
+		return
+	}
+	user, ok := userVal.(*User)
+	if !ok || !user.IsModerator() {
+		c.JSON(403, gin.H{"error": "Moderator privileges required"})
+		c.Abort()
+		return
+	}
+	c.Next()
+}
+
 func normalizeEscrowAmount(raw float64) (float64, bool) {
 	amt := roundVal(raw)
 	if amt < 0.01 {
@@ -153,39 +192,6 @@ func loadBannedWords() {
 	} else {
 		log.Printf("Loaded %d banned words", len(words))
 	}
-}
-
-var bannedWordPatterns []*regexp.Regexp
-var bannedWordPatternsOnce sync.Once
-
-func compileBannedWordPatterns() {
-	bannedWordPatternsOnce.Do(func() {
-		words, err := loadBannedWordsLocal()
-		if err != nil {
-			return
-		}
-		bannedWordPatterns = make([]*regexp.Regexp, 0, len(words))
-		for _, term := range words {
-			pattern := `\b` + regexp.QuoteMeta(strings.ToLower(term)) + `\b`
-			if re, err := regexp.Compile(pattern); err == nil {
-				bannedWordPatterns = append(bannedWordPatterns, re)
-			}
-		}
-	})
-}
-
-func containsDerogatory(text string) bool {
-	if text == "" {
-		return false
-	}
-	compileBannedWordPatterns()
-	textLower := strings.ToLower(text)
-	for _, re := range bannedWordPatterns {
-		if re.MatchString(textLower) {
-			return true
-		}
-	}
-	return false
 }
 
 func accountExists(userId UserId) bool {

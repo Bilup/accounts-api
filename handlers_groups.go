@@ -668,6 +668,7 @@ func representGroup(c *gin.Context) {
 	data, _ := getGroupDataByTag(groupTag)
 	user.Set("sys.group", data.Group.Id)
 	go saveUsers()
+	InvalidateUserGroupTagCache(user.GetUsername())
 
 	c.JSON(200, gin.H{"message": "You are now representing this group"})
 }
@@ -677,6 +678,7 @@ func disrepresentGroup(c *gin.Context) {
 
 	user.DelKey("sys.group")
 	go saveUsers()
+	InvalidateUserGroupTagCache(user.GetUsername())
 
 	c.JSON(200, gin.H{"message": "You are no longer representing any group"})
 }

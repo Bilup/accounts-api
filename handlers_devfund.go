@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"time"
 
@@ -85,63 +86,43 @@ func escrowTransfer(c *gin.Context) {
 	})
 }
 
-// escrowRelease - Release escrow credits to developer (admin only)
-func escrowRelease(c *gin.Context) {
-	user := c.MustGet("user").(*User)
+type escrowReleaseRequest struct {
+	Amount     float64 `json:"amount"`
+	ToUsername string  `json:"to_username"`
+	PetitionID string  `json:"petition_id"`
+	Note       string  `json:"note"`
+}
 
-	// Only allow mist (admin) to release escrow
-	if user.GetUsername().ToLower() != "mist" {
-		c.JSON(403, gin.H{"error": "Admin access required"})
-		return
-	}
-
-	var req struct {
-		Amount     float64 `json:"amount"`
-		ToUsername string  `json:"to_username"`
-		PetitionID string  `json:"petition_id"`
-		Note       string  `json:"note"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request payload"})
-		return
-	}
-
-	// Normalize & validate amount
+// performEscrowRelease credits the developer and records the transaction. It is
+// shared by the admin (mist) and the service-key (devfund vote) release paths.
+func performEscrowRelease(c *gin.Context, req escrowReleaseRequest) {
 	nAmount, ok := normalizeEscrowAmount(req.Amount)
 	if !ok {
 		c.JSON(400, gin.H{"error": "Minimum amount is 0.01"})
 		return
 	}
-
 	if req.ToUsername == "" {
 		c.JSON(400, gin.H{"error": "Recipient username is required"})
 		return
 	}
-
 	if req.PetitionID == "" {
 		c.JSON(400, gin.H{"error": "Petition ID is required"})
 		return
 	}
 
-	toUsername := Username(req.ToUsername)
-
-	toUser, err := getAccountByUsername(toUsername)
+	toUser, err := getAccountByUsername(Username(req.ToUsername))
 	if err != nil {
 		c.JSON(404, gin.H{"error": "Recipient user not found"})
 		return
 	}
 
-	// Get recipient balance
 	toCurrency := toUser.GetCredits()
 	if toCurrency == 0 {
 		toCurrency = float64(0)
 	}
-
-	// Add credits to recipient
 	newBal := roundVal(toCurrency + nAmount)
 	toUser.SetBalance(newBal)
 
-	// Add transaction to recipient
 	now := time.Now().UnixMilli()
 	note := strings.TrimSpace(req.Note)
 	if note == "" {
@@ -151,7 +132,6 @@ func escrowRelease(c *gin.Context) {
 		note = note[:50]
 	}
 
-	// Helper to add transaction
 	toUser.addTransaction(Transaction{
 		Note:       note,
 		User:       Username("rotur").Id(),
@@ -171,4 +151,41 @@ func escrowRelease(c *gin.Context) {
 		"petition_id": req.PetitionID,
 		"new_balance": newBal,
 	})
+}
+
+// escrowRelease - Release escrow credits to developer (admin only)
+func escrowRelease(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+
+	// Only allow mist (admin) to release escrow
+	if user.GetUsername().ToLower() != "mist" {
+		c.JSON(403, gin.H{"error": "Admin access required"})
+		return
+	}
+
+	var req escrowReleaseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "Invalid request payload"})
+		return
+	}
+	performEscrowRelease(c, req)
+}
+
+// escrowReleaseService - Release escrow credits to a developer on behalf of the
+// devFund service. Authenticated by a shared service key rather than a user
+// token, so backer-vote completion can pay out without an admin in the loop.
+func escrowReleaseService(c *gin.Context) {
+	key := c.GetHeader("X-Devfund-Key")
+	expected := os.Getenv("DEVFUND_SERVICE_KEY")
+	if expected == "" || key != expected {
+		c.JSON(403, gin.H{"error": "Invalid service key"})
+		return
+	}
+
+	var req escrowReleaseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "Invalid request payload"})
+		return
+	}
+	performEscrowRelease(c, req)
 }

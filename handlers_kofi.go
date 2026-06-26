@@ -172,19 +172,29 @@ func setSubscription(c *gin.Context) {
 		return
 	}
 
+	days := 31
+	if rawDays, ok := data["days"]; ok {
+		if d, ok := rawDays.(float64); ok && d > 0 {
+			days = int(d)
+		}
+	}
+
 	user, err := getAccountByUsername(username)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "User not found"})
 		return
 	}
+	nextBilling := int64(time.Now().Add(time.Hour * 24 * time.Duration(days)).UnixMilli())
 	user.SetSubscription(subscription{
 		Tier:         tier,
 		Active:       true,
-		Next_billing: int64(time.Now().Add(time.Hour * 24 * 30).UnixMilli()),
+		Next_billing: nextBilling,
 	})
 	go saveUsers()
 
-	c.JSON(200, gin.H{"message": "Subscription updated successfully"})
+	keyUpdated := setKeyNextBilling(user.GetId(), LITE_SUBSCRIPTION_KEY, nextBilling)
+
+	c.JSON(200, gin.H{"message": "Subscription updated successfully", "days": days, "key_updated": keyUpdated})
 }
 
 func getUserSubscriptionBenefits(c *gin.Context) {

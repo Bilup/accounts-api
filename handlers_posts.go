@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"os"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -14,10 +16,97 @@ import (
 	"github.com/joho/godotenv"
 )
 
+func clawCanEdit(user *User) bool  { return hasTierOrHigher(user.GetSubscription().Tier, "Plus") }
+func clawCanVideo(user *User) bool { return hasTierOrHigher(user.GetSubscription().Tier, "Pro") }
+
+func clawPostLimit(user *User) int {
+	t := user.GetSubscription().Tier
+	switch {
+	case hasTierOrHigher(t, "Max"):
+		return 1000
+	case hasTierOrHigher(t, "Pro"):
+		return 800
+	case hasTierOrHigher(t, "Plus"):
+		return 600
+	case hasTierOrHigher(t, "Lite"):
+		return 400
+	default:
+		return 300
+	}
+}
+
+func clawMaxPins(user *User) int {
+	t := user.GetSubscription().Tier
+	if hasTierOrHigher(t, "Pro") {
+		return 5
+	}
+	if hasTierOrHigher(t, "Plus") {
+		return 3
+	}
+	return 1
+}
+
+func clawMaxAttachments(user *User) int {
+	t := user.GetSubscription().Tier
+	if hasTierOrHigher(t, "Pro") {
+		return 4
+	}
+	if hasTierOrHigher(t, "Plus") {
+		return 2
+	}
+	return 1
+}
+
+func clawFeedLimit(user *User) int {
+	if hasTierOrHigher(user.GetSubscription().Tier, "Plus") {
+		return 200
+	}
+	return 100
+}
+
 var postLimits = map[string]int{
 	"content_length":         300,
 	"content_length_premium": 600,
 	"attachment_length":      200,
+}
+
+var mentionRe = regexp.MustCompile(`@([a-zA-Z0-9_-]{1,30})`)
+
+func validateAttachmentURL(url string) string {
+	if len(url) > postLimits["attachment_length"] {
+		return "Attachment URL exceeds " + strconv.Itoa(postLimits["attachment_length"]) + " character limit"
+	}
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return "Attachment must be a valid URL"
+	}
+	if isFromBannedDomain(url) {
+		return "Attachment from prohibited website"
+	}
+	allowed := []string{"image/png", "image/jpeg", "image/gif", "video/mp4", "video/webm"}
+	if !isValidMimeType(url, allowed) {
+		return "Attachment must be an image or video (PNG, JPEG, GIF, MP4, WEBM)"
+	}
+	return ""
+}
+
+func notifyMentions(content string, author UserId, postID string) {
+	matches := mentionRe.FindAllStringSubmatch(content, -1)
+	if len(matches) == 0 {
+		return
+	}
+	seen := map[UserId]bool{author: true}
+	for _, m := range matches {
+		uid := Username(m[1]).Id()
+		if uid == "" || seen[uid] {
+			continue
+		}
+		seen[uid] = true
+		addUserEvent(uid, "mention", map[string]any{
+			"user":    string(author),
+			"post_id": postID,
+			"content": content,
+		})
+	}
 }
 
 var lockedKeys = []string{"last_login", "max_size", "key", "created", "discord_id", "sys.id", "password"}
@@ -41,10 +130,6 @@ func createPost(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 
 	content := c.Query("content")
-	if content == "" {
-		c.JSON(400, gin.H{"error": "Content is required"})
-		return
-	}
 
 	osParam := c.Query("os")
 	if osParam != "" {
@@ -62,11 +147,7 @@ func createPost(c *gin.Context) {
 		}
 	}
 
-	// claw key id, this is not a security issue
-	chars := postLimits["content_length"]
-	if doesUserOwnKey(user.GetId(), "bd6249d2b87796a25c30b1f1722f784f") {
-		chars = postLimits["content_length_premium"]
-	}
+	chars := clawPostLimit(user)
 
 	// Check content length
 	if len(content) > chars {
@@ -74,39 +155,84 @@ func createPost(c *gin.Context) {
 		return
 	}
 
-	// Check for derogatory language
-	if containsDerogatory(content) {
-		c.JSON(400, gin.H{"error": "Post contains prohibited language"})
-		return
-	}
-
 	// Get attachment if available
 	var attachment *string
 	if attachmentStr := c.Query("attachment"); attachmentStr != "" {
-		if len(attachmentStr) > postLimits["attachment_length"] {
-			c.JSON(400, gin.H{"error": "Attachment URL exceeds " + strconv.Itoa(postLimits["attachment_length"]) + " character limit"})
+		if msg := validateAttachmentURL(attachmentStr); msg != "" {
+			c.JSON(400, gin.H{"error": msg})
 			return
 		}
-
-		if !strings.HasPrefix(attachmentStr, "http://") && !strings.HasPrefix(attachmentStr, "https://") {
-			c.JSON(400, gin.H{"error": "Attachment must be a valid URL"})
-			return
-		}
-
-		// Check if attachment is from a banned domain
-		if isFromBannedDomain(attachmentStr) {
-			c.JSON(400, gin.H{"error": "Attachment from prohibited website"})
-			return
-		}
-
-		// Verify MIME type
-		allowedMimeTypes := []string{"image/png", "image/jpeg", "image/gif"}
-		if !isValidMimeType(attachmentStr, allowedMimeTypes) {
-			c.JSON(400, gin.H{"error": "Attachment must be a valid image (PNG, JPEG, GIF)"})
-			return
-		}
-
 		attachment = &attachmentStr
+	}
+
+	var attachmentsList []string
+	if multi := c.Query("attachments"); multi != "" {
+		maxN := clawMaxAttachments(user)
+		for _, raw := range strings.Split(multi, ",") {
+			u := strings.TrimSpace(raw)
+			if u == "" {
+				continue
+			}
+			if len(attachmentsList) >= maxN {
+				c.JSON(400, gin.H{"error": "Too many attachments (max " + strconv.Itoa(maxN) + " for your subscription tier)"})
+				return
+			}
+			if msg := validateAttachmentURL(u); msg != "" {
+				c.JSON(400, gin.H{"error": msg})
+				return
+			}
+			attachmentsList = append(attachmentsList, u)
+		}
+		if len(attachmentsList) > 0 {
+			first := attachmentsList[0]
+			attachment = &first
+		}
+	}
+
+	var poll *Poll
+	if pollStr := c.Query("poll"); pollStr != "" {
+		if !hasTierOrHigher(user.GetSubscription().Tier, "Plus") {
+			c.JSON(403, gin.H{"error": "Polls require a Plus subscription or higher"})
+			return
+		}
+		var opts []string
+		if err := json.Unmarshal([]byte(pollStr), &opts); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid poll"})
+			return
+		}
+		clean := make([]string, 0, len(opts))
+		for _, o := range opts {
+			o = strings.TrimSpace(o)
+			if o != "" && len(o) <= 80 {
+				clean = append(clean, o)
+			}
+		}
+		if len(clean) < 2 || len(clean) > 6 {
+			c.JSON(400, gin.H{"error": "A poll needs between 2 and 6 options"})
+			return
+		}
+		poll = &Poll{Options: clean, Votes: map[UserId]int{}}
+	}
+
+	var publishAt int64
+	if sched := c.Query("scheduled_for"); sched != "" {
+		if !hasTierOrHigher(user.GetSubscription().Tier, "Plus") {
+			c.JSON(403, gin.H{"error": "Scheduling posts requires a Plus subscription or higher"})
+			return
+		}
+		ms, err := strconv.ParseInt(sched, 10, 64)
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Invalid scheduled time"})
+			return
+		}
+		if ms > time.Now().UnixMilli()+30000 {
+			publishAt = ms
+		}
+	}
+
+	if strings.TrimSpace(content) == "" && attachment == nil && len(attachmentsList) == 0 && poll == nil {
+		c.JSON(400, gin.H{"error": "Post needs text, an attachment, or a poll"})
+		return
 	}
 
 	// Check if post is profile-only
@@ -119,11 +245,20 @@ func createPost(c *gin.Context) {
 		User:        user.GetId(),
 		Timestamp:   time.Now().UnixMilli(),
 		Attachment:  attachment,
+		Attachments: attachmentsList,
 		ProfileOnly: profileOnly,
+		Poll:        poll,
 	}
 
 	if osParam != "" {
 		newPost.OS = &osParam
+	}
+
+	if publishAt > 0 {
+		newPost.PublishAt = publishAt
+		addScheduledPost(newPost)
+		c.JSON(201, gin.H{"scheduled": true, "publish_at": publishAt, "id": newPost.ID})
+		return
 	}
 
 	postsMutex.Lock()
@@ -141,6 +276,8 @@ func createPost(c *gin.Context) {
 		}()
 	}
 
+	notifyMentions(content, user.GetId(), newPost.ID)
+
 	c.JSON(201, newPost.ToNet())
 }
 
@@ -157,6 +294,41 @@ func getPostById(id string) *Post {
 	}
 
 	return targetPost
+}
+
+func lookupPostUnlocked(id string) *Post {
+	for i := range posts {
+		if posts[i].ID == id {
+			return &posts[i]
+		}
+	}
+	return nil
+}
+
+func getPost(c *gin.Context) {
+	id := c.Query("id")
+	if id == "" {
+		c.JSON(400, gin.H{"error": "Post ID is required"})
+		return
+	}
+
+	postsMutex.RLock()
+	var net *NetPost
+	for i := range posts {
+		if posts[i].ID == id {
+			n := posts[i].ToNet()
+			net = &n
+			break
+		}
+	}
+	postsMutex.RUnlock()
+
+	if net == nil {
+		c.JSON(404, gin.H{"error": "Post not found"})
+		return
+	}
+
+	c.JSON(200, net)
 }
 
 func replyToPost(c *gin.Context) {
@@ -177,19 +349,10 @@ func replyToPost(c *gin.Context) {
 	}
 
 	// Check content length
-	postLimit := postLimits["content_length"]
-	if doesUserOwnKey(user.GetId(), "bd6249d2b87796a25c30b1f1722f784f") {
-		postLimit = postLimits["content_length_premium"]
-	}
+	postLimit := clawPostLimit(user)
 
 	if len(content) > postLimit {
 		c.JSON(400, gin.H{"error": "Content exceeds " + strconv.Itoa(postLimit) + " character limit"})
-		return
-	}
-
-	// Check for derogatory language
-	if containsDerogatory(content) {
-		c.JSON(400, gin.H{"error": "Reply contains prohibited language"})
 		return
 	}
 
@@ -227,6 +390,8 @@ func replyToPost(c *gin.Context) {
 		"user":     user.GetId(),
 		"content":  content,
 	})
+
+	notifyMentions(content, user.GetId(), postID)
 
 	c.JSON(201, newReply.ToNet())
 }
@@ -296,21 +461,17 @@ func editPost(c *gin.Context) {
 		return
 	}
 
-	if !doesUserOwnKey(user.GetId(), "bd6249d2b87796a25c30b1f1722f784f") {
-		c.JSON(403, gin.H{"error": "Editing posts requires Claw Premium"})
+	if !clawCanEdit(user) {
+		c.JSON(403, gin.H{"error": "Editing posts requires a Plus subscription or higher"})
 		return
 	}
 
-	chars := postLimits["content_length_premium"]
+	chars := clawPostLimit(user)
 	if len(content) > chars {
 		c.JSON(400, gin.H{"error": "Content exceeds " + strconv.Itoa(chars) + " character limit"})
 		return
 	}
 
-	if containsDerogatory(content) {
-		c.JSON(400, gin.H{"error": "Post contains prohibited language"})
-		return
-	}
 
 	targetPost := getPostById(postID)
 	if targetPost == nil {
@@ -464,24 +625,25 @@ func repost(c *gin.Context) {
 		return
 	}
 
-	// Create the repost
-	newRepost := Post{
-		ID:        generateToken(),
-		User:      user.GetId(),
-		Timestamp: time.Now().UnixMilli(),
-		IsRepost:  true,
-		OriginalPost: &Post{
-			ID:         originalPost.ID,
-			Content:    originalPost.Content,
-			User:       originalPost.User,
-			Timestamp:  originalPost.Timestamp,
-			Attachment: originalPost.Attachment,
-		},
-		ProfileOnly: true, // Reposts are profile-only as per Python implementation
+	content := c.Query("content")
+	if content != "" {
+		limit := clawPostLimit(user)
+		if len(content) > limit {
+			c.JSON(400, gin.H{"error": "Content exceeds " + strconv.Itoa(limit) + " character limit"})
+			return
+		}
 	}
 
-	if originalPost.OS != nil {
-		newRepost.OriginalPost.OS = originalPost.OS
+	quote := content != ""
+
+	newRepost := Post{
+		ID:             generateToken(),
+		User:           user.GetId(),
+		Content:        content,
+		Timestamp:      time.Now().UnixMilli(),
+		IsRepost:       true,
+		OriginalPostID: originalPost.ID,
+		ProfileOnly:    !quote,
 	}
 
 	postsMutex.Lock()
@@ -490,13 +652,26 @@ func repost(c *gin.Context) {
 
 	go savePosts()
 
+	if quote {
+		go func() {
+			postsMutex.RLock()
+			netPost := newRepost.ToNet()
+			postsMutex.RUnlock()
+			broadcastClawEvent("new_post", netPost)
+		}()
+		notifyMentions(content, user.GetId(), newRepost.ID)
+	}
+
 	addUserEvent(originalPost.User, "repost", map[string]any{
 		"repost_id":        newRepost.ID,
 		"user":             user.GetId(),
 		"original_post_id": originalPost.ID,
 	})
 
-	c.JSON(201, newRepost.ToNet())
+	postsMutex.RLock()
+	netRepost := newRepost.ToNet()
+	postsMutex.RUnlock()
+	c.JSON(201, netRepost)
 }
 
 func pinPost(c *gin.Context) {
@@ -518,6 +693,21 @@ func pinPost(c *gin.Context) {
 	// Check if the user is the owner of the post
 	if targetPost.User != user.GetId() {
 		c.JSON(403, gin.H{"error": "You can only pin your own posts"})
+		return
+	}
+
+	pinLimit := clawMaxPins(user)
+	uid := user.GetId()
+	pinnedCount := 0
+	postsMutex.RLock()
+	for i := range posts {
+		if posts[i].User == uid && posts[i].Pinned && posts[i].ID != postID {
+			pinnedCount++
+		}
+	}
+	postsMutex.RUnlock()
+	if pinnedCount >= pinLimit {
+		c.JSON(403, gin.H{"error": "Pin limit reached (" + strconv.Itoa(pinLimit) + "). " + map[bool]string{true: "Unpin another post first.", false: "Claw Premium allows up to 5 pins."}[pinLimit == 5]})
 		return
 	}
 
@@ -731,16 +921,17 @@ func getFeed(c *gin.Context) {
 }
 
 func getFollowingFeed(c *gin.Context) {
+	user := c.MustGet("user").(*User)
+
+	maxLimit := clawFeedLimit(user)
 	limitStr := c.DefaultQuery("limit", "100")
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit <= 0 {
 		limit = 100
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > maxLimit {
+		limit = maxLimit
 	}
-
-	user := c.MustGet("user").(*User)
 
 	userId := user.GetId()
 

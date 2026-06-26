@@ -25,6 +25,9 @@ func main() {
 	loadEventsHistory()
 	loadGifts()
 	loadCosmeticsCatalog()
+	loadFeatureStores()
+	loadReports()
+	go scheduleLoop()
 	loadCosmeticGifts()
 	buildSubTokenIndex()
 
@@ -67,9 +70,16 @@ func main() {
 		profile.POST("/cosmetics", rateLimit("default"), getProfileCosmeticsBatch)
 	}
 	r.GET("/feed", rateLimit("default"), getFeed)
+	r.GET("/get_post", rateLimit("default"), getPost)
 	r.GET("/following_feed", rateLimit("default"), requiresAuth, requirePermission(PermViewPosts), getFollowingFeed)
 	r.GET("/delete", requiresAuth, requirePermission(PermDeletePost), deletePost)
 	r.GET("/edit_post", rateLimit("default"), requiresAuth, requirePermission(PermManagePosts), requireStanding(StandingGood), editPost)
+	r.GET("/view", rateLimit("default"), requiresAuth, viewPost)
+	r.GET("/vote_poll", rateLimit("default"), requiresAuth, votePoll)
+	r.GET("/bookmark", requiresAuth, addBookmark)
+	r.GET("/unbookmark", requiresAuth, removeBookmark)
+	r.GET("/bookmarks", requiresAuth, getBookmarks)
+	r.GET("/scheduled", requiresAuth, getMyScheduled)
 	r.GET("/rate", requiresAuth, requirePermission(PermLikePost), ratePost)
 	r.GET("/repost", rateLimit("default"), requiresAuth, requirePermission(PermRepost), requireStanding(StandingGood), repost)
 	r.GET("/pin_post", requiresAuth, requirePermission(PermManagePosts), pinPost)
@@ -158,10 +168,24 @@ func main() {
 		admin.POST("/set_standing", setStandingAdmin)
 		admin.POST("/get_standing_history", getStandingHistoryAdmin)
 		admin.POST("/recover_standing", recoverStandingAdmin)
+		admin.POST("/set_moderator", setModeratorAdmin)
 	}
 
 	// Standing endpoints
 	r.GET("/get_standing", GetUserStanding)
+
+	r.POST("/report", rateLimit("default"), requiresAuth, submitReport)
+
+	mod := r.Group("/mod")
+	{
+		mod.GET("/reports", rateLimit("default"), requiresAuth, requireModerator, modListReports)
+		mod.POST("/resolve_report", rateLimit("default"), requiresAuth, requireModerator, modResolveReport)
+		mod.POST("/set_standing", rateLimit("default"), requiresAuth, requireModerator, modSetStanding)
+		mod.POST("/recover_standing", rateLimit("default"), requiresAuth, requireModerator, modRecoverStanding)
+		mod.POST("/standing_history", rateLimit("default"), requiresAuth, requireModerator, modGetStandingHistory)
+		mod.GET("/moderators", rateLimit("default"), requiresAuth, requireModerator, modListModerators)
+		mod.POST("/set_moderator", rateLimit("default"), requiresAuth, requireNetworkAdmin, modSetModerator)
+	}
 
 	// Users endpoints
 	r.GET("/me", rateLimit("profile"), getUser)
@@ -348,6 +372,7 @@ func main() {
 	{
 		devfund.POST("/escrow_transfer", requiresAuth, requirePermission(PermTransferCredits), escrowTransfer)
 		devfund.POST("/escrow_release", requiresAuth, requirePermission(PermManageCredits), escrowRelease)
+		devfund.POST("/escrow_release_service", escrowReleaseService)
 	}
 
 	tokens := r.Group("/tokens")

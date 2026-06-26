@@ -332,12 +332,18 @@ func userToNet(user User) User {
 	userCopy["sys.requests"] = user.GetRequestedUsers()
 	userCopy["sys.blocked"] = user.GetBlockedUsers()
 	userCopy["sys.notes"] = user.GetNotesNet()
+	userCopy["sys.moderator"] = user.IsModerator()
+	userCopy["sys.admin"] = user.IsNetworkAdmin()
 	transactions := user.GetTransactions()
 	netTransactions := make([]TransactionNet, len(transactions))
 	for i, transaction := range transactions {
 		netTransactions[i] = transaction.ToNet()
 	}
 	userCopy["sys.transactions"] = netTransactions
+
+	if userCopy["sys.banner"] != nil || userCopy["banner"] != nil {
+		userCopy["banner"] = "https://avatars.rotur.dev/.banners/" + string(user.GetUsername())
+	}
 
 	return userCopy
 }

@@ -34,7 +34,46 @@ var (
 
 	userTierCache   map[Username]string
 	userTierCacheMu sync.RWMutex
+
+	userGroupTagCache   map[Username]string
+	userGroupTagCacheMu sync.RWMutex
 )
+
+func getUserGroupTagCached(username Username) string {
+	username = username.ToLower()
+	userGroupTagCacheMu.RLock()
+	tag, ok := userGroupTagCache[username]
+	userGroupTagCacheMu.RUnlock()
+	if ok {
+		return tag
+	}
+	tag = ""
+	if user, err := getAccountByUsername(username); err == nil {
+		if gid, ok := user["sys.group"].(string); ok && gid != "" {
+			groupsDataMutex.RLock()
+			for t, data := range groupsData {
+				if string(data.Group.Id) == gid {
+					tag = t
+					break
+				}
+			}
+			groupsDataMutex.RUnlock()
+		}
+	}
+	userGroupTagCacheMu.Lock()
+	if userGroupTagCache == nil {
+		userGroupTagCache = make(map[Username]string)
+	}
+	userGroupTagCache[username] = tag
+	userGroupTagCacheMu.Unlock()
+	return tag
+}
+
+func InvalidateUserGroupTagCache(username Username) {
+	userGroupTagCacheMu.Lock()
+	delete(userGroupTagCache, username.ToLower())
+	userGroupTagCacheMu.Unlock()
+}
 
 const defaultAvatarURL = "https://raw.githubusercontent.com/Mistium/Origin-OS/main/Resources/no-pfp.jpeg"
 

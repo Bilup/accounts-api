@@ -683,6 +683,22 @@ func (u User) IsBanned() bool {
 	return banned == true || banned == "true"
 }
 
+func (u User) IsNetworkAdmin() bool {
+	return isHardcodedAdmin(u.GetUsername())
+}
+
+func (u User) IsModerator() bool {
+	if u.IsNetworkAdmin() {
+		return true
+	}
+	mod := u.Get("sys.moderator")
+	return mod == true || mod == "true"
+}
+
+func (u User) SetModerator(isMod bool) {
+	u.Set("sys.moderator", isMod)
+}
+
 func (u User) IsPrivate() bool {
 	private := u.Get("private")
 	return private == true
@@ -1025,7 +1041,7 @@ func (u User) GetSubscription() subscription {
 		Next_billing: 0,
 	}
 	checkExternalBilling := func() (ok bool) {
-		next := getKeyNextBilling(u.GetId(), "4f229157f0c40f5a98cbf28efd39cfe8")
+		next := getKeyNextBilling(u.GetId(), LITE_SUBSCRIPTION_KEY)
 		if next == 0 {
 			return false
 		}
@@ -1048,6 +1064,9 @@ func (u User) GetSubscription() subscription {
 	val.Next_billing = int64(getIntOrDefault(sub["next_billing"], 0))
 
 	if val.Next_billing == 0 {
+		if checkExternalBilling() {
+			return val
+		}
 		val.Active = false
 		val.Tier = "Free"
 		return val
@@ -1304,14 +1323,53 @@ type Post struct {
 	User         UserId   `json:"user"`
 	Timestamp    int64    `json:"timestamp"`
 	Attachment   *string  `json:"attachment,omitempty"`
+	Attachments  []string `json:"attachments,omitempty"`
 	ProfileOnly  bool     `json:"profile_only,omitempty"`
 	OS           *string  `json:"os,omitempty"`
 	Replies      []Reply  `json:"replies,omitempty"`
 	Likes        []UserId `json:"likes,omitempty"`
 	Pinned       bool     `json:"pinned,omitempty"`
-	IsRepost     bool     `json:"is_repost,omitempty"`
-	OriginalPost *Post    `json:"original_post,omitempty"`
+	IsRepost       bool   `json:"is_repost,omitempty"`
+	OriginalPostID string `json:"original_post_id,omitempty"`
+	OriginalPost   *Post  `json:"original_post,omitempty"`
 	EditedAt     int64    `json:"edited_at,omitempty"`
+	Viewers      []UserId `json:"viewers,omitempty"`
+	Poll         *Poll    `json:"poll,omitempty"`
+	PublishAt    int64    `json:"publish_at,omitempty"`
+}
+
+type Poll struct {
+	Options []string         `json:"options"`
+	Votes   map[UserId]int   `json:"votes,omitempty"`
+}
+
+type NetPollOption struct {
+	Text  string `json:"text"`
+	Count int    `json:"count"`
+}
+
+type NetPoll struct {
+	Options []NetPollOption `json:"options"`
+	Total   int             `json:"total"`
+}
+
+func (p *Poll) ToNet() *NetPoll {
+	if p == nil {
+		return nil
+	}
+	counts := make([]int, len(p.Options))
+	total := 0
+	for _, opt := range p.Votes {
+		if opt >= 0 && opt < len(counts) {
+			counts[opt]++
+			total++
+		}
+	}
+	out := &NetPoll{Options: make([]NetPollOption, len(p.Options)), Total: total}
+	for i, text := range p.Options {
+		out.Options[i] = NetPollOption{Text: text, Count: counts[i]}
+	}
+	return out
 }
 
 type NetPost struct {
@@ -1320,6 +1378,7 @@ type NetPost struct {
 	User         Username   `json:"user"`
 	Timestamp    int64      `json:"timestamp"`
 	Attachment   *string    `json:"attachment,omitempty"`
+	Attachments  []string   `json:"attachments,omitempty"`
 	ProfileOnly  bool       `json:"profile_only,omitempty"`
 	OS           *string    `json:"os,omitempty"`
 	Replies      []NetReply `json:"replies,omitempty"`
@@ -1328,6 +1387,11 @@ type NetPost struct {
 	IsRepost     bool       `json:"is_repost,omitempty"`
 	OriginalPost *NetPost   `json:"original_post,omitempty"`
 	EditedAt     int64      `json:"edited_at,omitempty"`
+	Premium      bool       `json:"premium,omitempty"`
+	Tier         string     `json:"tier,omitempty"`
+	GroupTag     string     `json:"group_tag,omitempty"`
+	Views        int        `json:"views,omitempty"`
+	Poll         *NetPoll   `json:"poll,omitempty"`
 }
 
 func resolveUser(u UserId) Username {
@@ -1347,15 +1411,32 @@ func (p Post) ToNet() NetPost {
 		likes = append(likes, resolveUser(like))
 	}
 	var original *NetPost
-	if p.OriginalPost != nil {
+	if p.OriginalPostID != "" {
+		if op := lookupPostUnlocked(p.OriginalPostID); op != nil {
+			o := op.ToNet()
+			original = &o
+		}
+	}
+	if original == nil && p.OriginalPost != nil {
 		o := p.OriginalPost.ToNet()
 		original = &o
+	}
+	username := resolveUser(p.User)
+	premium := false
+	tierStr := ""
+	if tier, ok := getUserTierCached(username); ok && tierRank(tier) >= 1 {
+		tierStr = tier
+		premium = hasTierOrHigher(tier, "Plus")
 	}
 	return NetPost{
 		ID:           p.ID,
 		Content:      p.Content,
-		User:         resolveUser(p.User),
+		User:         username,
+		Premium:      premium,
+		Tier:         tierStr,
+		GroupTag:     getUserGroupTagCached(username),
 		Attachment:   p.Attachment,
+		Attachments:  p.Attachments,
 		ProfileOnly:  p.ProfileOnly,
 		OS:           p.OS,
 		Replies:      replies,
@@ -1365,6 +1446,8 @@ func (p Post) ToNet() NetPost {
 		OriginalPost: original,
 		Timestamp:    p.Timestamp,
 		EditedAt:     p.EditedAt,
+		Views:        len(p.Viewers),
+		Poll:         p.Poll.ToNet(),
 	}
 }
 
@@ -2089,6 +2172,7 @@ func (p *Post) UnmarshalJSON(data []byte) error {
 		Content      string   `json:"content"`
 		User         UserId   `json:"user"`
 		Attachment   *string  `json:"attachment,omitempty"`
+		Attachments  []string `json:"attachments,omitempty"`
 		ProfileOnly  bool     `json:"profile_only,omitempty"`
 		OS           *string  `json:"os,omitempty"`
 		Replies      []Reply  `json:"replies,omitempty"`
@@ -2096,6 +2180,10 @@ func (p *Post) UnmarshalJSON(data []byte) error {
 		Pinned       bool     `json:"pinned,omitempty"`
 		IsRepost     bool     `json:"is_repost,omitempty"`
 		OriginalPost *Post    `json:"original_post,omitempty"`
+		EditedAt     int64    `json:"edited_at,omitempty"`
+		Viewers      []UserId `json:"viewers,omitempty"`
+		Poll         *Poll    `json:"poll,omitempty"`
+		PublishAt    int64    `json:"publish_at,omitempty"`
 	}
 
 	var temp TempPost
@@ -2109,6 +2197,7 @@ func (p *Post) UnmarshalJSON(data []byte) error {
 	p.User = temp.User
 	p.Timestamp = timestamp
 	p.Attachment = temp.Attachment
+	p.Attachments = temp.Attachments
 	p.ProfileOnly = temp.ProfileOnly
 	p.OS = temp.OS
 	p.Replies = temp.Replies
@@ -2116,6 +2205,10 @@ func (p *Post) UnmarshalJSON(data []byte) error {
 	p.Pinned = temp.Pinned
 	p.IsRepost = temp.IsRepost
 	p.OriginalPost = temp.OriginalPost
+	p.EditedAt = temp.EditedAt
+	p.Viewers = temp.Viewers
+	p.Poll = temp.Poll
+	p.PublishAt = temp.PublishAt
 
 	return nil
 }
