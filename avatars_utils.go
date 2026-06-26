@@ -208,7 +208,9 @@ func roundCorners(imgData []byte, radius int) ([]byte, string, error) {
 	if err := png.Encode(buf, result); err != nil {
 		return imgData, "image/jpeg", err
 	}
-	return buf.Bytes(), "image/png", nil
+	out := make([]byte, buf.Len())
+	copy(out, buf.Bytes())
+	return out, "image/png", nil
 }
 
 func applyMaskToPaletted(paletted *image.Paletted, mask *image.Alpha, w, h int) error {
