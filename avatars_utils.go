@@ -128,16 +128,6 @@ var avatarBufPool = sync.Pool{
 
 // --- Image processing functions ---
 
-// isPixelInCircle returns true if (x,y) falls within a circle of the given radius
-// centered in a width x height rectangle.
-func isPixelInCircle(x, y, width, height, radius int) bool {
-	cx := width / 2
-	cy := height / 2
-	dx := x - cx
-	dy := y - cy
-	return dx*dx+dy*dy <= radius*radius
-}
-
 func roundedRectMask(w, h, radius int) *image.Alpha {
 	mask := image.NewAlpha(image.Rect(0, 0, w, h))
 
@@ -145,19 +135,26 @@ func roundedRectMask(w, h, radius int) *image.Alpha {
 		mask.Pix[i] = 255
 	}
 
+	if radius <= 0 {
+		return mask
+	}
+	if radius > w/2 {
+		radius = w / 2
+	}
+	if radius > h/2 {
+		radius = h / 2
+	}
+
+	r2 := radius * radius
 	for y := 0; y < radius; y++ {
+		dy := y - radius
 		for x := 0; x < radius; x++ {
-			if !isPixelInCircle(x, y, radius, radius, radius) {
-				mask.Pix[y*mask.Stride+x] = 0
-			}
-			if !isPixelInCircle(w-1-x, y, radius, radius, radius) {
-				mask.Pix[y*mask.Stride+(w-1-x)] = 0
-			}
-			if !isPixelInCircle(x, h-1-y, radius, radius, radius) {
-				mask.Pix[(h-1-y)*mask.Stride+x] = 0
-			}
-			if !isPixelInCircle(w-1-x, h-1-y, radius, radius, radius) {
-				mask.Pix[(h-1-y)*mask.Stride+(w-1-x)] = 0
+			dx := x - radius
+			if dx*dx+dy*dy > r2 {
+				mask.Pix[y*mask.Stride+x] = 0             // top-left
+				mask.Pix[y*mask.Stride+(w-1-x)] = 0       // top-right
+				mask.Pix[(h-1-y)*mask.Stride+x] = 0       // bottom-left
+				mask.Pix[(h-1-y)*mask.Stride+(w-1-x)] = 0 // bottom-right
 			}
 		}
 	}
