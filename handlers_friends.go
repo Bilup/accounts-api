@@ -31,9 +31,11 @@ func sendFriendRequest(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Already Friends"})
 		return
 	}
-	if target.IsFriend(senderName) {
+	if sender.HasRequest(targetLower) {
 		sender.AddFriend(targetLower)
+		target.AddFriend(senderName)
 		sender.RemoveRequest(targetLower)
+		target.RemoveRequest(senderName)
 		go saveUsers()
 		c.JSON(200, gin.H{"message": "Friend request accepted automatically"})
 		return

@@ -107,7 +107,11 @@ func normalizeUserTimeLayout(layout string) string {
 		for i := 0; i < len(s); i++ {
 			switch s[i] {
 			case 'h':
-				b.WriteString("15")
+				if hasAmPm {
+					b.WriteString("03")
+				} else {
+					b.WriteString("15")
+				}
 				replaced = true
 			case 'm':
 				b.WriteString("04")

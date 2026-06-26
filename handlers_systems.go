@@ -74,7 +74,7 @@ func updateSystem(c *gin.Context) {
 	user := c.MustGet("user").(*User)
 
 	// only allow the owner of the system or mist to update it
-	if system.Owner.Name != user.GetUsername() && user.GetUsername().ToLower() != "mist" {
+	if !strings.EqualFold(string(system.Owner.Name), string(user.GetUsername())) && user.GetUsername().ToLower() != "mist" {
 		c.JSON(403, gin.H{"error": "Insufficient permissions"})
 		return
 	}
@@ -105,8 +105,8 @@ func setSystem(systemName string, key string, value any) error {
 			return nil
 		}
 	case "owner_name":
-		if v, ok := value.(Username); ok {
-			system.Owner.Name = v
+		if v, ok := value.(string); ok {
+			system.Owner.Name = Username(v)
 			systems[systemName] = system
 			return nil
 		}
@@ -178,7 +178,7 @@ func getSystemUsers(c *gin.Context) {
 		return
 	}
 
-	if system.Owner.Name != user.GetUsername() && user.GetUsername().ToLower() != "mist" {
+	if !strings.EqualFold(string(system.Owner.Name), string(user.GetUsername())) && user.GetUsername().ToLower() != "mist" {
 		c.JSON(403, gin.H{"error": "Insufficient permissions"})
 		return
 	}

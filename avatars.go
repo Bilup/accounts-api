@@ -193,7 +193,7 @@ func getAvatarMetadata(username Username) (filePath, contentType, etag string, e
 			if ext == ".gif" {
 				ct = "image/gif"
 			}
-			return fp, ct, fmt.Sprintf("%s-%d", username, info.ModTime().Unix()), nil
+			return fp, ct, fmt.Sprintf("%s-%d", base, info.ModTime().Unix()), nil
 		}
 	}
 	return "", "", "", os.ErrNotExist
@@ -572,8 +572,9 @@ func savePfp(dataURI string, user *User) error {
 func invalidateAvatarCacheForUser(username string) {
 	avatarCache.mu.Lock()
 	defer avatarCache.mu.Unlock()
+	prefix := username + "-"
 	for key := range avatarCache.items {
-		if strings.HasPrefix(key, username) {
+		if strings.HasPrefix(key, prefix) {
 			avatarCache.curBytes -= avatarCache.items[key].size
 			avatarCache.removeEntry(avatarCache.items[key])
 			delete(avatarCache.items, key)
@@ -631,7 +632,7 @@ func getBannerPath(username Username) (string, string, string, time.Time, error)
 			case ".png":
 				ct = "image/png"
 			}
-			return fp, ct, fmt.Sprintf("%s-%d", username, fi.ModTime().Unix()), fi.ModTime(), nil
+			return fp, ct, fmt.Sprintf("%s-%d", base, fi.ModTime().Unix()), fi.ModTime(), nil
 		}
 	}
 	return "", "", "", time.Time{}, os.ErrNotExist

@@ -53,6 +53,7 @@ func followUser(c *gin.Context) {
 	data := followersData[targetId]
 	data.Followers = append(data.Followers, currentId)
 	followersData[targetId] = data
+	followingCountMap[currentId]++
 	go saveFollowers()
 	followersCount := len(data.Followers)
 	followersMutex.Unlock()

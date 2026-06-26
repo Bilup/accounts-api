@@ -140,7 +140,11 @@ func handleKofiTransaction(c *gin.Context) {
 				})
 				go saveUsers()
 			}
-			switch item["direct_link_code"].(string) {
+			if account == nil {
+				continue
+			}
+			code, _ := item["direct_link_code"].(string)
+			switch code {
 			case "eebeb7269f":
 				addCredits(50)
 			case "0638cbfd65":
@@ -164,8 +168,9 @@ func setSubscription(c *gin.Context) {
 		return
 	}
 
-	username := Username(data["username"].(string))
-	tier := data["tier"].(string)
+	usernameStr, _ := data["username"].(string)
+	tier, _ := data["tier"].(string)
+	username := Username(usernameStr)
 
 	if username == "" || tier == "" {
 		c.JSON(400, gin.H{"error": "Username and tier are required"})

@@ -312,11 +312,21 @@ func getPost(c *gin.Context) {
 		return
 	}
 
+	var viewer UserId
+	if authKey := extractAuthKey(c); authKey != "" {
+		if u := authenticateWithKey(authKey); u != nil {
+			viewer = u.GetId()
+		}
+	}
+
 	postsMutex.RLock()
 	var net *NetPost
 	for i := range posts {
 		if posts[i].ID == id {
 			n := posts[i].ToNet()
+			if n.Poll != nil {
+				n.Poll.Voted = posts[i].Poll.votedBy(viewer)
+			}
 			net = &n
 			break
 		}
@@ -891,12 +901,23 @@ func getFeed(c *gin.Context) {
 		offset = 0
 	}
 
+	var viewer UserId
+	if authKey := extractAuthKey(c); authKey != "" {
+		if u := authenticateWithKey(authKey); u != nil {
+			viewer = u.GetId()
+		}
+	}
+
 	postsMutex.RLock()
-	// Filter out profile-only posts
 	publicPosts := make([]NetPost, 0)
-	for _, post := range posts {
+	for i := range posts {
+		post := posts[i]
 		if !post.ProfileOnly {
-			publicPosts = append(publicPosts, post.ToNet())
+			np := post.ToNet()
+			if np.Poll != nil {
+				np.Poll.Voted = post.Poll.votedBy(viewer)
+			}
+			publicPosts = append(publicPosts, np)
 		}
 	}
 	postsMutex.RUnlock()
@@ -948,10 +969,15 @@ func getFollowingFeed(c *gin.Context) {
 	// Get posts from followed users (excluding profile-only posts from other users)
 	postsMutex.RLock()
 	followingPosts := make([]NetPost, 0)
-	for _, post := range posts {
+	for i := range posts {
+		post := posts[i]
 		isFollowed := slices.Contains(following, post.User)
 		if isFollowed && !(post.ProfileOnly && post.User != userId) {
-			followingPosts = append(followingPosts, post.ToNet())
+			np := post.ToNet()
+			if np.Poll != nil {
+				np.Poll.Voted = post.Poll.votedBy(userId)
+			}
+			followingPosts = append(followingPosts, np)
 		}
 	}
 	postsMutex.RUnlock()

@@ -145,7 +145,33 @@ func buyItem(c *gin.Context) {
 
 	go saveItems()
 
-	user.SetBalance(userCurrency - float64(targetItem.Price))
+	now := time.Now().UnixMilli()
+	price := float64(targetItem.Price)
+
+	newBuyerBal := roundVal(userCurrency - price)
+	user.SetBalance(newBuyerBal)
+	user.addTransaction(Transaction{
+		Note:      "Item purchase: " + targetItem.Name,
+		User:      oldOwner,
+		Amount:    price,
+		Type:      "item_buy",
+		NewTotal:  newBuyerBal,
+		Timestamp: now,
+	})
+
+	seller := getUserById(oldOwner)
+	if len(seller) > 0 {
+		newSellerBal := roundVal(seller.GetCredits() + price)
+		seller.SetBalance(newSellerBal)
+		seller.addTransaction(Transaction{
+			Note:      "Item sold: " + targetItem.Name,
+			User:      user.GetId(),
+			Amount:    price,
+			Type:      "item_sale",
+			NewTotal:  newSellerBal,
+			Timestamp: now,
+		})
+	}
 	go saveUsers()
 
 	// Notify both users

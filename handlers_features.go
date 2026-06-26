@@ -237,7 +237,9 @@ func votePoll(c *gin.Context) {
 			"data": netPoll,
 		})
 	}
-	c.JSON(200, gin.H{"poll": netPoll})
+	respPoll := *netPoll
+	respPoll.Voted = &option
+	c.JSON(200, gin.H{"poll": &respPoll})
 }
 
 // ---- Scheduled posts (Plus+) ----

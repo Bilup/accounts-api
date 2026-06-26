@@ -119,6 +119,10 @@ func createKey(c *gin.Context) {
 	}
 
 	keys = append(keys, newKey)
+	if keyStringToIdx == nil {
+		keyStringToIdx = make(map[string]int)
+	}
+	keyStringToIdx[newKey.Key] = len(keys) - 1
 
 	go saveKeys()
 
@@ -228,6 +232,11 @@ func deleteKey(c *gin.Context) {
 
 			// Remove the key
 			keys = append(keys[:i], keys[i+1:]...)
+			rebuiltIdx := make(map[string]int, len(keys))
+			for j := range keys {
+				rebuiltIdx[keys[j].Key] = j
+			}
+			keyStringToIdx = rebuiltIdx
 
 			go saveKeys()
 
@@ -669,7 +678,7 @@ func checkSubscriptions() {
 
 		type keySnapshot struct {
 			Key       *Key
-			KeyIndex  int
+			KeyStr    string
 			Owner     User
 			OwnerUser User
 			UsersData map[UserId]KeyUserData
@@ -694,7 +703,7 @@ func checkSubscriptions() {
 			}
 			snapshots = append(snapshots, keySnapshot{
 				Key:       key,
-				KeyIndex:  keyIndex,
+				KeyStr:    key.Key,
 				Owner:     owner,
 				UsersData: usersCopy,
 			})
@@ -773,7 +782,9 @@ func checkSubscriptions() {
 							nextBillingTime := computeNextBilling(snap.Key.Subscription)
 							userData.NextBilling = nextBillingTime.UnixMilli()
 							keysMutex.Lock()
-							keys[snap.KeyIndex].Users[userId] = userData
+							if idx, ok := keyStringToIdx[snap.KeyStr]; ok && idx < len(keys) && keys[idx].Key == snap.KeyStr {
+								keys[idx].Users[userId] = userData
+							}
 							keysMutex.Unlock()
 							continue
 						}
@@ -822,13 +833,14 @@ func checkSubscriptions() {
 						})
 						usersDirty = true
 
-						// Update total income and next billing for the key
-						keysMutex.Lock()
-						keys[snap.KeyIndex].TotalIncome += userData.Price
 						nextBillingTime := computeNextBilling(snap.Key.Subscription)
 						newNextBilling := nextBillingTime.UnixMilli()
 						userData.NextBilling = newNextBilling
-						keys[snap.KeyIndex].Users[userId] = userData
+						keysMutex.Lock()
+						if idx, ok := keyStringToIdx[snap.KeyStr]; ok && idx < len(keys) && keys[idx].Key == snap.KeyStr {
+							keys[idx].TotalIncome += userData.Price
+							keys[idx].Users[userId] = userData
+						}
 						keysMutex.Unlock()
 
 						if snap.Key.Webhook != nil && len(*snap.Key.Webhook) > 0 {
@@ -848,12 +860,13 @@ func checkSubscriptions() {
 				}
 			}
 
-			// Apply removals under keys write lock
 			if len(usersToRemove) > 0 {
 				keysMutex.Lock()
-				for _, username := range usersToRemove {
-					delete(keys[snap.KeyIndex].Users, username)
-					log.Printf("Removed user %s from key %s due to payment failure", username, snap.Key.Key)
+				if idx, ok := keyStringToIdx[snap.KeyStr]; ok && idx < len(keys) && keys[idx].Key == snap.KeyStr {
+					for _, username := range usersToRemove {
+						delete(keys[idx].Users, username)
+						log.Printf("Removed user %s from key %s due to payment failure", username, snap.Key.Key)
+					}
 				}
 				keysMutex.Unlock()
 			}

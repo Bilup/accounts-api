@@ -41,12 +41,11 @@ func getNotifications(c *gin.Context) {
 	if exists {
 		for _, event := range userEvents {
 			if event.Timestamp >= cutoffTime {
-				notification := map[string]any{
-					"type":      event.Type,
-					"id":        event.ID,
-					"timestamp": event.Timestamp,
-				}
+				notification := map[string]any{}
 				maps.Copy(notification, event.Data)
+				notification["type"] = event.Type
+				notification["id"] = event.ID
+				notification["timestamp"] = event.Timestamp
 				notifications = append(notifications, notification)
 			}
 		}

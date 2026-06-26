@@ -1351,6 +1351,18 @@ type NetPollOption struct {
 type NetPoll struct {
 	Options []NetPollOption `json:"options"`
 	Total   int             `json:"total"`
+	Voted   *int            `json:"voted,omitempty"`
+}
+
+func (p *Poll) votedBy(viewer UserId) *int {
+	if p == nil || viewer == "" {
+		return nil
+	}
+	if opt, ok := p.Votes[viewer]; ok {
+		v := opt
+		return &v
+	}
+	return nil
 }
 
 func (p *Poll) ToNet() *NetPoll {

@@ -1135,7 +1135,19 @@ func withdrawTip(c *gin.Context) {
 		return
 	}
 
-	// Credit the user's balance
+	withdrawal := GroupTipWithdrawal{
+		Id:            uuid.New().String(),
+		GroupTag:      groupTag,
+		ToUserId:      user.GetId(),
+		AmountCredits: nAmount,
+		CreatedAt:     time.Now().Unix(),
+	}
+
+	if !addGroupWithdrawal(groupTag, withdrawal) {
+		c.JSON(400, gin.H{"error": "Insufficient funds in group tip jar"})
+		return
+	}
+
 	userCredits := user.GetCredits()
 	user.SetBalance(roundVal(userCredits + nAmount))
 	user.addTransaction(Transaction{
@@ -1146,16 +1158,6 @@ func withdrawTip(c *gin.Context) {
 		Timestamp: time.Now().UnixMilli(),
 		NewTotal:  roundVal(userCredits + nAmount),
 	})
-
-	withdrawal := GroupTipWithdrawal{
-		Id:            uuid.New().String(),
-		GroupTag:      groupTag,
-		ToUserId:      user.GetId(),
-		AmountCredits: nAmount,
-		CreatedAt:     time.Now().Unix(),
-	}
-
-	addGroupWithdrawal(groupTag, withdrawal)
 	go saveUsers()
 
 	c.JSON(201, withdrawal.ToNet())

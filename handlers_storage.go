@@ -130,10 +130,23 @@ func loadGroupData() {
 		if err == nil {
 			var tips []GroupTip
 			if json.Unmarshal(tipsData, &tips) == nil {
-				groupData.Group.CreditsBalance = 0
+				balance := 0.0
 				for _, tip := range tips {
-					groupData.Group.CreditsBalance += tip.AmountCredits
+					balance += tip.AmountCredits
 				}
+				withdrawalsPath := filepath.Join(GROUPS_FILE_PATH, entry.Name(), "withdrawals.json")
+				if withdrawalsData, wErr := os.ReadFile(withdrawalsPath); wErr == nil {
+					var withdrawals []GroupTipWithdrawal
+					if json.Unmarshal(withdrawalsData, &withdrawals) == nil {
+						for _, w := range withdrawals {
+							balance -= w.AmountCredits
+						}
+					}
+				}
+				if balance < 0 {
+					balance = 0
+				}
+				groupData.Group.CreditsBalance = balance
 			}
 		}
 		tag := groupData.Group.Tag
@@ -184,23 +197,34 @@ func deleteGroupData(groupTag string) {
 }
 
 func atomicWrite(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
+	tmp := f.Name()
 	if _, err = f.Write(data); err != nil {
 		f.Close()
+		os.Remove(tmp)
 		return err
 	}
 	if err = f.Sync(); err != nil {
 		f.Close()
+		os.Remove(tmp)
 		return err
 	}
 	if err = f.Close(); err != nil {
+		os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err = os.Chmod(tmp, perm); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err = os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 var (
@@ -329,6 +353,7 @@ func loadFollowers() {
 
 	if _, err := os.Stat(FOLLOWERS_FILE_PATH); os.IsNotExist(err) {
 		followersData = make(map[UserId]FollowerData)
+		followingCountMap = make(map[UserId]int)
 		followersMutex.Unlock()
 		return
 	}
@@ -337,6 +362,7 @@ func loadFollowers() {
 	if err != nil {
 		log.Printf("Error reading followers file: %v", err)
 		followersData = make(map[UserId]FollowerData)
+		followingCountMap = make(map[UserId]int)
 		followersMutex.Unlock()
 		return
 	}
@@ -345,6 +371,7 @@ func loadFollowers() {
 	if err := json.Unmarshal(data, &tempData); err != nil {
 		log.Printf("Error unmarshaling followers: %v", err)
 		followersData = make(map[UserId]FollowerData)
+		followingCountMap = make(map[UserId]int)
 		followersMutex.Unlock()
 		return
 	}
@@ -555,7 +582,27 @@ func saveEventsHistory() {
 	saveJsonFile(EVENTS_HISTORY_PATH, eventsHistory)
 }
 
+var (
+	saveLocksMu sync.Mutex
+	saveLocks   = map[string]*sync.Mutex{}
+)
+
+func saveLockFor(path string) *sync.Mutex {
+	saveLocksMu.Lock()
+	defer saveLocksMu.Unlock()
+	m, ok := saveLocks[path]
+	if !ok {
+		m = &sync.Mutex{}
+		saveLocks[path] = m
+	}
+	return m
+}
+
 func saveJsonFile(path string, v any) bool {
+	lock := saveLockFor(path)
+	lock.Lock()
+	defer lock.Unlock()
+
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		log.Printf("Error marshaling JSON: %v", err)
@@ -567,6 +614,19 @@ func saveJsonFile(path string, v any) bool {
 		return false
 	}
 	return true
+}
+
+func flushAll() {
+	savePosts()
+	saveScheduledPosts()
+	saveBookmarks()
+	saveItems()
+	saveKeys()
+	saveFollowers()
+	saveGifts()
+	saveReports()
+	saveEventsHistory()
+	saveCosmeticGifts()
 }
 
 func watchUsersFile() {

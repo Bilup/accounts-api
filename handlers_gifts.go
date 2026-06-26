@@ -169,27 +169,30 @@ func claimGift(c *gin.Context) {
 		return
 	}
 
-	if !gift.CanBeClaimed() {
-		if gift.ClaimedAt != nil {
+	now := time.Now().UnixMilli()
+	claimedBy := userId
+
+	giftsMutex.Lock()
+	g := &gifts[giftIdx]
+	if !g.CanBeClaimed() {
+		giftsMutex.Unlock()
+		switch {
+		case g.ClaimedAt != nil:
 			c.JSON(400, gin.H{"error": "This gift has already been claimed"})
-			return
-		}
-		if gift.CancelledAt != nil {
+		case g.CancelledAt != nil:
 			c.JSON(400, gin.H{"error": "This gift has been cancelled"})
-			return
-		}
-		if gift.IsExpired() {
+		default:
 			c.JSON(400, gin.H{"error": "This gift has expired"})
-			return
 		}
+		return
 	}
+	g.ClaimedAt = &now
+	g.ClaimedBy = &claimedBy
+	giftsMutex.Unlock()
 
 	userCredits := user.GetCredits()
 	newBal := roundVal(userCredits + gift.Amount)
 	user.SetBalance(newBal)
-
-	now := time.Now().UnixMilli()
-	claimedBy := userId
 
 	user.addTransaction(Transaction{
 		Note:      gift.Note,
@@ -215,11 +218,6 @@ func claimGift(c *gin.Context) {
 			GiftCode:  gift.Code,
 		})
 	}
-
-	giftsMutex.Lock()
-	gifts[giftIdx].ClaimedAt = &now
-	gifts[giftIdx].ClaimedBy = &claimedBy
-	giftsMutex.Unlock()
 
 	go saveGifts()
 	go saveUsers()
@@ -262,26 +260,29 @@ func cancelGift(c *gin.Context) {
 		return
 	}
 
-	if !gift.CanBeCancelled() {
-		if gift.ClaimedAt != nil {
+	now := time.Now().UnixMilli()
+
+	giftsMutex.Lock()
+	g := &gifts[giftIdx]
+	if !g.CanBeCancelled() {
+		giftsMutex.Unlock()
+		switch {
+		case g.ClaimedAt != nil:
 			c.JSON(400, gin.H{"error": "This gift has already been claimed"})
-			return
-		}
-		if gift.CancelledAt != nil {
+		case g.CancelledAt != nil:
 			c.JSON(400, gin.H{"error": "This gift has already been cancelled"})
-			return
-		}
-		if gift.IsExpired() {
+		default:
 			c.JSON(400, gin.H{"error": "This gift has expired"})
-			return
 		}
+		return
 	}
+	g.CancelledAt = &now
+	giftsMutex.Unlock()
 
 	userCredits := user.GetCredits()
 	newBal := roundVal(userCredits + gift.Amount)
 	user.SetBalance(newBal)
 
-	now := time.Now().UnixMilli()
 	user.addTransaction(Transaction{
 		Note:      "Gift cancelled: " + gift.Code,
 		User:      UserId(""),
@@ -292,10 +293,6 @@ func cancelGift(c *gin.Context) {
 		GiftId:    gift.Id,
 		GiftCode:  gift.Code,
 	})
-
-	giftsMutex.Lock()
-	gifts[giftIdx].CancelledAt = &now
-	giftsMutex.Unlock()
 
 	go saveGifts()
 	go saveUsers()

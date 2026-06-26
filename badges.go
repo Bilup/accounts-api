@@ -110,7 +110,7 @@ func calculateUserBadges(user User) []Badge {
 	}
 
 	subscription := user.GetSubscription()
-	if subscription.Tier == "Pro" || subscription.Tier == "Max" {
+	if hasTierOrHigher(subscription.Tier, "Pro") {
 		badges = append(badges, Badge{
 			Name:        "pro",
 			Icon:        "scale 1.16 w 3 c #edb210 tri -6 -4 6 -4 0 5 c #ffc50a square 0 -5 6 1 tri -6 -4 -2 -4 -7 4 tri 6 -4 2 -4 7 4 w 2 c #a7213a tri 0 1 -2 -2 2 -2 c #c0365a tri 0 -4 -2 -2 2 -2",
@@ -122,7 +122,7 @@ func calculateUserBadges(user User) []Badge {
 	jsonBadgesMutex.RLock()
 	for _, jsonBadge := range jsonBadges {
 		for _, badgeUser := range jsonBadge.Users {
-			if badgeUser == username {
+			if badgeUser.ToLower() == username {
 				badges = append(badges, Badge{
 					Name:        jsonBadge.Name,
 					Icon:        jsonBadge.Icon,

@@ -84,16 +84,21 @@ func saveGroupWithdrawals(groupTag string, withdrawals []GroupTipWithdrawal) {
 	}
 }
 
-func addGroupWithdrawal(groupTag string, withdrawal GroupTipWithdrawal) {
+func addGroupWithdrawal(groupTag string, withdrawal GroupTipWithdrawal) bool {
+	groupsDataMutex.Lock()
+	data, ok := groupsData[groupTag]
+	if !ok || data == nil || data.Group.CreditsBalance < withdrawal.AmountCredits {
+		groupsDataMutex.Unlock()
+		return false
+	}
+	data.Group.CreditsBalance = roundVal(data.Group.CreditsBalance - withdrawal.AmountCredits)
+	groupsDataMutex.Unlock()
+
 	withdrawals := loadGroupWithdrawals(groupTag)
 	withdrawals = append(withdrawals, withdrawal)
-	groupsDataMutex.Lock()
-	data := groupsData[groupTag]
-	data.Group.CreditsBalance -= withdrawal.AmountCredits
-	groupsData[groupTag] = data
-	groupsDataMutex.Unlock()
 	go saveGroupWithdrawals(groupTag, withdrawals)
 	go saveGroupData(groupTag)
+	return true
 }
 
 func saveGroupTips(groupTag string, tips []GroupTip) {

@@ -162,26 +162,6 @@ func roundedRectMask(w, h, radius int) *image.Alpha {
 	return mask
 }
 
-func circleMask(w, h, radius int) *image.Alpha {
-	if radius <= 0 || radius > w/2 || radius > h/2 {
-		radius = min(w, h) / 2
-	}
-	mask := image.NewAlpha(image.Rect(0, 0, w, h))
-	cx, cy := w/2, h/2
-	r2 := radius * radius
-	for y := 0; y < h; y++ {
-		dy := y - cy
-		rowOff := y * mask.Stride
-		for x := 0; x < w; x++ {
-			dx := x - cx
-			if dx*dx+dy*dy <= r2 {
-				mask.Pix[rowOff+x] = 255
-			}
-		}
-	}
-	return mask
-}
-
 func roundCorners(imgData []byte, radius int) ([]byte, string, error) {
 	img, _, err := image.Decode(bytes.NewReader(imgData))
 	if err != nil {
@@ -256,7 +236,7 @@ func roundGIF(src *gif.GIF, radius int) (*gif.GIF, error) {
 		return src, nil
 	}
 
-	mask := circleMask(w, h, radius)
+	mask := roundedRectMask(w, h, radius)
 
 	dst := &gif.GIF{
 		LoopCount: src.LoopCount,

@@ -185,7 +185,7 @@ func startStandingRecoveryChecker() {
 			time.Sleep(5 * time.Minute)
 
 			type recoveryEntry struct {
-				Index    int
+				Id       UserId
 				NewLevel StandingLevel
 			}
 			var pending []recoveryEntry
@@ -206,14 +206,16 @@ func startStandingRecoveryChecker() {
 					default:
 						continue
 					}
-					pending = append(pending, recoveryEntry{Index: i, NewLevel: newLevel})
+					pending = append(pending, recoveryEntry{Id: user.GetId(), NewLevel: newLevel})
 				}
 			}
 			usersMutex.RUnlock()
 
 			if len(pending) > 0 {
 				for _, entry := range pending {
-					users[entry.Index].SetStanding(entry.NewLevel, "Automatic recovery", UserId("system"))
+					if u := getUserById(entry.Id); len(u) > 0 {
+						u.SetStanding(entry.NewLevel, "Automatic recovery", UserId("system"))
+					}
 				}
 				go saveUsers()
 			}

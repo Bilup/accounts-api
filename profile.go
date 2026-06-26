@@ -48,7 +48,10 @@ type profileResp struct {
 func renderBioRegex(bio string, profile User, otherKeys profileResp) string {
 	safeProfile := map[string]string{}
 	for k, v := range profile {
-		if k == "key" || k == "password" || k == "sys.salt" {
+		lk := strings.ToLower(k)
+		if k == "key" || k == "password" || k == "sys.salt" || k == "email" ||
+			strings.Contains(lk, "token") || strings.Contains(lk, "password") ||
+			strings.Contains(lk, "secret") {
 			continue
 		}
 		switch val := v.(type) {

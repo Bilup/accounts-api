@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/gin-gonic/gin"
 )
@@ -45,6 +48,16 @@ func main() {
 	go cleanExpiredSubTokens()
 	go startStandingRecoveryChecker()
 	StartValidatorCleanup()
+
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		sig := <-sigCh
+		log.Printf("Received %s, flushing state to disk...", sig)
+		flushAll()
+		log.Println("Flush complete, exiting")
+		os.Exit(0)
+	}()
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
