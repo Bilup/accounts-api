@@ -210,7 +210,7 @@ func shouldConvertToStill(c *gin.Context, tier string, contentType string, metaE
 	if metaErr != nil || contentType != "image/gif" {
 		return false
 	}
-	if c.Query("no_animate") != "" {
+	if c.Query("no_animate") == "1" {
 		return true
 	}
 	allowAnimated := hasTierOrHigher(tier, "plus")
@@ -661,7 +661,7 @@ func bannerHandler(c *gin.Context) {
 	}
 
 	radiusStr := c.Query("radius")
-	noAnimate := c.Query("no_animate") != ""
+	noAnimate := c.Query("no_animate") == "1"
 	radiusInt, parseErr := strconv.Atoi(strings.TrimSuffix(radiusStr, "px"))
 	needRounding := radiusStr != "" && parseErr == nil && radiusInt > 0
 
