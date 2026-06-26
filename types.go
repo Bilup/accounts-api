@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -902,17 +903,25 @@ func (u User) GetCreated() int64 {
 
 func (u User) GetNotes() map[UserId]string {
 	notes := u.Get("sys.notes")
-	if notes == nil {
-		return map[UserId]string{}
-	}
-	m, ok := notes.(map[UserId]any)
-	if !ok {
-		return map[UserId]string{}
-	}
 	out := make(map[UserId]string)
-	for k, v := range m {
-		if s, ok := v.(string); ok {
-			out[k] = s
+	switch m := notes.(type) {
+	case map[UserId]string:
+		maps.Copy(out, m)
+	case map[UserId]any:
+		for k, v := range m {
+			if s, ok := v.(string); ok {
+				out[k] = s
+			}
+		}
+	case map[string]string:
+		for k, v := range m {
+			out[UserId(k)] = v
+		}
+	case map[string]any:
+		for k, v := range m {
+			if s, ok := v.(string); ok {
+				out[UserId(k)] = s
+			}
 		}
 	}
 	return out
@@ -1318,29 +1327,29 @@ type FollowerData struct {
 
 // Post represents a social media post
 type Post struct {
-	ID           string   `json:"id"`
-	Content      string   `json:"content"`
-	User         UserId   `json:"user"`
-	Timestamp    int64    `json:"timestamp"`
-	Attachment   *string  `json:"attachment,omitempty"`
-	Attachments  []string `json:"attachments,omitempty"`
-	ProfileOnly  bool     `json:"profile_only,omitempty"`
-	OS           *string  `json:"os,omitempty"`
-	Replies      []Reply  `json:"replies,omitempty"`
-	Likes        []UserId `json:"likes,omitempty"`
-	Pinned       bool     `json:"pinned,omitempty"`
-	IsRepost       bool   `json:"is_repost,omitempty"`
-	OriginalPostID string `json:"original_post_id,omitempty"`
-	OriginalPost   *Post  `json:"original_post,omitempty"`
-	EditedAt     int64    `json:"edited_at,omitempty"`
-	Viewers      []UserId `json:"viewers,omitempty"`
-	Poll         *Poll    `json:"poll,omitempty"`
-	PublishAt    int64    `json:"publish_at,omitempty"`
+	ID             string   `json:"id"`
+	Content        string   `json:"content"`
+	User           UserId   `json:"user"`
+	Timestamp      int64    `json:"timestamp"`
+	Attachment     *string  `json:"attachment,omitempty"`
+	Attachments    []string `json:"attachments,omitempty"`
+	ProfileOnly    bool     `json:"profile_only,omitempty"`
+	OS             *string  `json:"os,omitempty"`
+	Replies        []Reply  `json:"replies,omitempty"`
+	Likes          []UserId `json:"likes,omitempty"`
+	Pinned         bool     `json:"pinned,omitempty"`
+	IsRepost       bool     `json:"is_repost,omitempty"`
+	OriginalPostID string   `json:"original_post_id,omitempty"`
+	OriginalPost   *Post    `json:"original_post,omitempty"`
+	EditedAt       int64    `json:"edited_at,omitempty"`
+	Viewers        []UserId `json:"viewers,omitempty"`
+	Poll           *Poll    `json:"poll,omitempty"`
+	PublishAt      int64    `json:"publish_at,omitempty"`
 }
 
 type Poll struct {
-	Options []string         `json:"options"`
-	Votes   map[UserId]int   `json:"votes,omitempty"`
+	Options []string       `json:"options"`
+	Votes   map[UserId]int `json:"votes,omitempty"`
 }
 
 type NetPollOption struct {

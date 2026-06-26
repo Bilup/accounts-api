@@ -9,6 +9,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func findItemByNameUnsafe(name string) *Item {
+	for i := range items {
+		if strings.ToLower(items[i].Name) == name {
+			return &items[i]
+		}
+	}
+	return nil
+}
+
 // Item handlers
 func transferItem(c *gin.Context) {
 	name := strings.ToLower(c.Param("name"))
@@ -39,14 +48,7 @@ func transferItem(c *gin.Context) {
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
 
-	var targetItem *Item
-	for i := range items {
-		if strings.ToLower(items[i].Name) == name {
-			targetItem = &items[i]
-			break
-		}
-	}
-
+	targetItem := findItemByNameUnsafe(name)
 	if targetItem == nil {
 		c.JSON(404, gin.H{"error": "Item not found"})
 		return
@@ -92,14 +94,7 @@ func buyItem(c *gin.Context) {
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
 
-	var targetItem *Item
-	for i := range items {
-		if strings.ToLower(items[i].Name) == name {
-			targetItem = &items[i]
-			break
-		}
-	}
-
+	targetItem := findItemByNameUnsafe(name)
 	if targetItem == nil {
 		c.JSON(404, gin.H{"error": "Item not found"})
 		return
@@ -200,14 +195,7 @@ func stopSellingItem(c *gin.Context) {
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
 
-	var targetItem *Item
-	for i := range items {
-		if strings.ToLower(items[i].Name) == name {
-			targetItem = &items[i]
-			break
-		}
-	}
-
+	targetItem := findItemByNameUnsafe(name)
 	if targetItem == nil {
 		c.JSON(404, gin.H{"error": "Item not found"})
 		return
@@ -249,14 +237,7 @@ func setItemPrice(c *gin.Context) {
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
 
-	var targetItem *Item
-	for i := range items {
-		if strings.ToLower(items[i].Name) == name {
-			targetItem = &items[i]
-			break
-		}
-	}
-
+	targetItem := findItemByNameUnsafe(name)
 	if targetItem == nil {
 		c.JSON(404, gin.H{"error": "Item not found"})
 		return
@@ -369,14 +350,7 @@ func getItem(c *gin.Context) {
 
 	itemsMutex.RLock()
 	defer itemsMutex.RUnlock()
-	var targetItem *Item
-	for _, item := range items {
-		if strings.ToLower(item.Name) == name {
-			targetItem = &item
-			break
-		}
-	}
-
+	targetItem := findItemByNameUnsafe(name)
 	if targetItem == nil {
 		c.JSON(404, gin.H{"error": "Item not found"})
 		return
@@ -467,14 +441,7 @@ func updateItem(c *gin.Context) {
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
 
-	var targetItem *Item
-	for i := range items {
-		if strings.ToLower(items[i].Name) == name {
-			targetItem = &items[i]
-			break
-		}
-	}
-
+	targetItem := findItemByNameUnsafe(name)
 	if targetItem == nil {
 		c.JSON(404, gin.H{"error": "Item not found"})
 		return
@@ -506,14 +473,7 @@ func sellItem(c *gin.Context) {
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
 
-	var targetItem *Item
-	for i := range items {
-		if strings.ToLower(items[i].Name) == name {
-			targetItem = &items[i]
-			break
-		}
-	}
-
+	targetItem := findItemByNameUnsafe(name)
 	if targetItem == nil {
 		c.JSON(404, gin.H{"error": "Item not found"})
 		return

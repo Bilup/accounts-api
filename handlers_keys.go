@@ -725,15 +725,7 @@ func checkSubscriptions() {
 
 				// If user scheduled cancellation and we've reached that time, remove them now.
 				if userData.CancelAt != nil {
-					var cancelAt int64
-					switch v := userData.CancelAt.(type) {
-					case float64:
-						cancelAt = int64(v)
-					case int64:
-						cancelAt = v
-					case int:
-						cancelAt = int64(v)
-					}
+					cancelAt := getInt64OrDefault(userData.CancelAt, 0)
 					if cancelAt > 0 {
 						if cancelAt < 10_000_000_000 {
 							cancelAt = cancelAt * 1000
@@ -747,18 +739,11 @@ func checkSubscriptions() {
 
 				username := userId.User().GetUsername()
 
-				var nextBilling int64
-				switch v := userData.NextBilling.(type) {
-				case float64:
-					nextBilling = int64(v)
-				case int64:
-					nextBilling = v
-				case int:
-					nextBilling = int64(v)
-				default:
+				if userData.NextBilling == nil {
 					log.Printf("Warning: Invalid NextBilling type for user %s in key %s", username, snap.Key.Key)
 					continue
 				}
+				nextBilling := getInt64OrDefault(userData.NextBilling, 0)
 
 				currentTimeMs := time.Now().UnixMilli()
 				nextBillingTime := time.Unix(nextBilling/1000, 0)

@@ -481,8 +481,8 @@ func sendTip(c *gin.Context) {
 	}
 
 	amountStr := c.Query("amount")
-	amount, err := strconv.ParseFloat(amountStr, 64)
-	if err != nil || amount <= 0 || !isFiniteAmount(amount) {
+	amount, ok := parsePositiveAmount(amountStr)
+	if !ok {
 		c.JSON(400, gin.H{"error": "Invalid amount"})
 		return
 	}
@@ -624,8 +624,8 @@ func createGroupProduct(c *gin.Context) {
 		return
 	}
 
-	price, err := strconv.ParseFloat(c.Query("price_credits"), 64)
-	if err != nil || price <= 0 || !isFiniteAmount(price) {
+	price, ok := parsePositiveAmount(c.Query("price_credits"))
+	if !ok {
 		c.JSON(400, gin.H{"error": "Invalid price"})
 		return
 	}
@@ -633,6 +633,7 @@ func createGroupProduct(c *gin.Context) {
 	frequency := 0
 	period := ""
 	if subscription {
+		var err error
 		frequency, err = strconv.Atoi(c.DefaultQuery("frequency", "1"))
 		if err != nil || frequency <= 0 {
 			c.JSON(400, gin.H{"error": "Invalid frequency"})
@@ -1111,8 +1112,8 @@ func withdrawTip(c *gin.Context) {
 	}
 
 	amountStr := c.Query("amount")
-	amount, err := strconv.ParseFloat(amountStr, 64)
-	if err != nil || amount <= 0 || !isFiniteAmount(amount) {
+	amount, ok := parsePositiveAmount(amountStr)
+	if !ok {
 		c.JSON(400, gin.H{"error": "Invalid amount"})
 		return
 	}

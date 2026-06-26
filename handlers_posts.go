@@ -296,6 +296,18 @@ func getPostById(id string) *Post {
 	return targetPost
 }
 
+func mutatePostByID(id string, fn func(p *Post)) bool {
+	postsMutex.Lock()
+	defer postsMutex.Unlock()
+	for i := range posts {
+		if posts[i].ID == id {
+			fn(&posts[i])
+			return true
+		}
+	}
+	return false
+}
+
 func lookupPostUnlocked(id string) *Post {
 	for i := range posts {
 		if posts[i].ID == id {
@@ -366,21 +378,18 @@ func replyToPost(c *gin.Context) {
 		return
 	}
 
-	var targetPost *Post = getPostById(postID)
+	targetPost := getPostById(postID)
 
 	if targetPost == nil {
 		c.JSON(404, gin.H{"error": "Post not found"})
 		return
 	}
+	postOwner := targetPost.User
 
-	foundUser, err := getAccountByUserId(targetPost.User)
+	foundUser, err := getAccountByUserId(postOwner)
 	if err != nil || isUserBlockedBy(foundUser, user.GetId()) {
 		c.JSON(400, gin.H{"error": "You cant reply to this post"})
 		return
-	}
-
-	if targetPost.Replies == nil {
-		targetPost.Replies = make([]Reply, 0)
 	}
 
 	newReply := Reply{
@@ -390,11 +399,16 @@ func replyToPost(c *gin.Context) {
 		Timestamp: time.Now().UnixMilli(),
 	}
 
-	targetPost.Replies = append(targetPost.Replies, newReply)
+	if !mutatePostByID(postID, func(p *Post) {
+		p.Replies = append(p.Replies, newReply)
+	}) {
+		c.JSON(404, gin.H{"error": "Post not found"})
+		return
+	}
 
 	go savePosts()
 
-	addUserEvent(targetPost.User, "reply", map[string]any{
+	addUserEvent(postOwner, "reply", map[string]any{
 		"post_id":  postID,
 		"reply_id": newReply.ID,
 		"user":     user.GetId(),
@@ -499,12 +513,17 @@ func editPost(c *gin.Context) {
 		return
 	}
 
-	postsMutex.Lock()
-	targetPost.Content = content
-	targetPost.EditedAt = time.Now().UnixMilli()
-	editedAt := targetPost.EditedAt
-	profileOnly := targetPost.ProfileOnly
-	postsMutex.Unlock()
+	var editedAt int64
+	var profileOnly bool
+	if !mutatePostByID(postID, func(p *Post) {
+		p.Content = content
+		p.EditedAt = time.Now().UnixMilli()
+		editedAt = p.EditedAt
+		profileOnly = p.ProfileOnly
+	}) {
+		c.JSON(404, gin.H{"error": "Post not found"})
+		return
+	}
 
 	go savePosts()
 
@@ -540,7 +559,7 @@ func ratePost(c *gin.Context) {
 		return
 	}
 
-	var targetPost *Post = getPostById(postID)
+	targetPost := getPostById(postID)
 
 	if targetPost == nil {
 		c.JSON(404, gin.H{"error": "Post not found"})
@@ -555,37 +574,37 @@ func ratePost(c *gin.Context) {
 		}
 	}
 
-	// Ensure the 'likes' array exists
-	if targetPost.Likes == nil {
-		targetPost.Likes = make([]UserId, 0)
-	}
-
 	userId := user.GetId()
 
-	// Like or unlike based on the rating
-	if rating == 1 {
-		// Check if user already liked
-		alreadyLiked := slices.Contains(targetPost.Likes, userId)
-		if !alreadyLiked {
-			targetPost.Likes = append(targetPost.Likes, userId)
-		}
-	} else {
-		// Remove like
-		newLikes := make([]UserId, 0)
-		for _, liker := range targetPost.Likes {
-			if liker != userId {
-				newLikes = append(newLikes, liker)
+	var likesSnapshot []UserId
+	var profileOnly bool
+	if !mutatePostByID(postID, func(p *Post) {
+		if rating == 1 {
+			if !slices.Contains(p.Likes, userId) {
+				p.Likes = append(p.Likes, userId)
 			}
+		} else {
+			newLikes := make([]UserId, 0, len(p.Likes))
+			for _, liker := range p.Likes {
+				if liker != userId {
+					newLikes = append(newLikes, liker)
+				}
+			}
+			p.Likes = newLikes
 		}
-		targetPost.Likes = newLikes
+		likesSnapshot = append([]UserId(nil), p.Likes...)
+		profileOnly = p.ProfileOnly
+	}) {
+		c.JSON(404, gin.H{"error": "Post not found"})
+		return
 	}
 
 	go savePosts()
 
 	// Broadcast rating update for public posts
-	if !targetPost.ProfileOnly {
-		likes := make([]Username, 0)
-		for _, liker := range targetPost.Likes {
+	if !profileOnly {
+		likes := make([]Username, 0, len(likesSnapshot))
+		for _, liker := range likesSnapshot {
 			likes = append(likes, liker.User().GetUsername())
 		}
 		go broadcastClawEvent("update_post", map[string]any{
@@ -597,7 +616,7 @@ func ratePost(c *gin.Context) {
 
 	c.JSON(200, gin.H{
 		"message": "Post rated successfully",
-		"likes":   targetPost.Likes,
+		"likes":   likesSnapshot,
 	})
 }
 
@@ -721,14 +740,19 @@ func pinPost(c *gin.Context) {
 		return
 	}
 
-	postsMutex.Lock()
-	targetPost.Pinned = true
-	postsMutex.Unlock()
+	var profileOnly bool
+	if !mutatePostByID(postID, func(p *Post) {
+		p.Pinned = true
+		profileOnly = p.ProfileOnly
+	}) {
+		c.JSON(404, gin.H{"error": "Post not found"})
+		return
+	}
 
 	go savePosts()
 
 	// Broadcast pin update for public posts
-	if !targetPost.ProfileOnly {
+	if !profileOnly {
 		go broadcastClawEvent("update_post", map[string]any{
 			"id":   postID,
 			"key":  "pinned",
@@ -761,14 +785,19 @@ func unpinPost(c *gin.Context) {
 		return
 	}
 
-	postsMutex.Lock()
-	targetPost.Pinned = false
-	postsMutex.Unlock()
+	var profileOnly bool
+	if !mutatePostByID(postID, func(p *Post) {
+		p.Pinned = false
+		profileOnly = p.ProfileOnly
+	}) {
+		c.JSON(404, gin.H{"error": "Post not found"})
+		return
+	}
 
 	go savePosts()
 
 	// Broadcast unpin update for public posts
-	if !targetPost.ProfileOnly {
+	if !profileOnly {
 		go broadcastClawEvent("update_post", map[string]any{
 			"id":   postID,
 			"key":  "pinned",

@@ -64,20 +64,7 @@ func getKeyNextBilling(userId UserId, key string) int64 {
 	if !exists {
 		return 0
 	}
-	nextBilling := userData.NextBilling
-	if nextBilling == nil {
-		return 0
-	}
-	switch v := nextBilling.(type) {
-	case float64:
-		return int64(v)
-	case int64:
-		return v
-	case int:
-		return int64(v)
-	default:
-		return 0
-	}
+	return getInt64OrDefault(userData.NextBilling, 0)
 }
 
 func setKeyNextBilling(userId UserId, key string, nextBilling int64) bool {

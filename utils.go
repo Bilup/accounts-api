@@ -75,6 +75,28 @@ func getIntOrDefault(val any, defaultVal int) int {
 	return defaultVal
 }
 
+func getInt64OrDefault(val any, defaultVal int64) int64 {
+	if val == nil {
+		return defaultVal
+	}
+
+	switch v := val.(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case float64:
+		return int64(v)
+	case float32:
+		return int64(v)
+	case json.Number:
+		i, _ := v.Int64()
+		return i
+	}
+
+	return defaultVal
+}
+
 func getFloatOrDefault(val any, defaultVal float64) float64 {
 	if val == nil {
 		return defaultVal
@@ -183,6 +205,14 @@ func requireModerator(c *gin.Context) {
 
 func isFiniteAmount(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+func parsePositiveAmount(s string) (float64, bool) {
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil || v <= 0 || !isFiniteAmount(v) {
+		return 0, false
+	}
+	return v, true
 }
 
 func normalizeEscrowAmount(raw float64) (float64, bool) {

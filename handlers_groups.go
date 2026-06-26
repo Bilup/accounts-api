@@ -105,38 +105,12 @@ func createGroup(c *gin.Context) {
 		return
 	}
 
-	_, exists := getGroupByTag(tag)
-	if exists {
-		c.JSON(400, gin.H{"error": "Group with this tag already exists"})
-		return
-	}
-
 	ownerId := user.GetId()
-	// Charge 50 credits to create a group
 	userCredits := user.GetCredits()
 	if userCredits < 50 {
 		c.JSON(400, gin.H{"error": "Insufficient funds to create a group (50 credits required)", "required": 50.0, "available": userCredits})
 		return
 	}
-	groupsDataMutex.RLock()
-	for _, data := range groupsData {
-		if data.Group.OwnerUserId == ownerId {
-			groupsDataMutex.RUnlock()
-			c.JSON(400, gin.H{"error": "You already own a group"})
-			return
-		}
-	}
-	groupsDataMutex.RUnlock()
-	user.SetBalance(roundVal(userCredits - 50))
-	user.addTransaction(Transaction{
-		Note:      "Group creation fee for " + tag,
-		User:      UserId(""),
-		Amount:    50,
-		Type:      "group_create",
-		Timestamp: time.Now().UnixMilli(),
-		NewTotal:  roundVal(userCredits - 50),
-	})
-	go saveUsers()
 
 	groupId := GroupId(uuid.New().String())
 	group := Group{
@@ -223,8 +197,31 @@ func createGroup(c *gin.Context) {
 	}
 
 	groupsDataMutex.Lock()
+	if _, exists := groupsData[tag]; exists {
+		groupsDataMutex.Unlock()
+		c.JSON(400, gin.H{"error": "Group with this tag already exists"})
+		return
+	}
+	for _, data := range groupsData {
+		if data.Group.OwnerUserId == ownerId {
+			groupsDataMutex.Unlock()
+			c.JSON(400, gin.H{"error": "You already own a group"})
+			return
+		}
+	}
 	groupsData[tag] = &newGroupData
 	groupsDataMutex.Unlock()
+
+	user.SetBalance(roundVal(userCredits - 50))
+	user.addTransaction(Transaction{
+		Note:      "Group creation fee for " + tag,
+		User:      UserId(""),
+		Amount:    50,
+		Type:      "group_create",
+		Timestamp: time.Now().UnixMilli(),
+		NewTotal:  roundVal(userCredits - 50),
+	})
+	go saveUsers()
 	go saveGroupData(tag)
 
 	log.Printf("Created group '%s' with tag '%s'", name, tag)
