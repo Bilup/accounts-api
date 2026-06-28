@@ -47,6 +47,8 @@ type profileResp struct {
 
 func renderBioRegex(bio string, profile User, otherKeys profileResp) string {
 	safeProfile := map[string]string{}
+	mu := getMutexForUser(profile)
+	mu.Lock()
 	for k, v := range profile {
 		lk := strings.ToLower(k)
 		if k == "key" || k == "password" || k == "sys.salt" || k == "email" ||
@@ -65,6 +67,7 @@ func renderBioRegex(bio string, profile User, otherKeys profileResp) string {
 			safeProfile[k] = strconv.FormatBool(val)
 		}
 	}
+	mu.Unlock()
 	safeProfile["bio"] = otherKeys.Bio
 	safeProfile["followers"] = fmt.Sprint(otherKeys.Followers)
 	safeProfile["following"] = fmt.Sprint(otherKeys.Following)
