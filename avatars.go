@@ -395,51 +395,38 @@ func avatarHandler(c *gin.Context) {
 		return
 	}
 
+	origW := img.Bounds().Dx()
+
+	resized := false
+	if sizeStr != "" {
+		if sz, err := strconv.Atoi(sizeStr); err == nil && sz > 0 && sz <= 256 {
+			img = resize.Resize(uint(sz), 0, img, resize.Lanczos3)
+			resized = true
+		}
+	}
+
+	rounded := false
 	if radiusStr != "" {
 		radiusInt, err := strconv.Atoi(strings.TrimSuffix(radiusStr, "px"))
 		if err == nil && radiusInt > 0 {
 			bounds := img.Bounds()
 			w, h := bounds.Dx(), bounds.Dy()
+			if resized && origW > 0 {
+				radiusInt = radiusInt * w / origW
+			}
 			if radiusInt > h/2 {
 				radiusInt = h / 2
 			}
 			result := image.NewRGBA(bounds)
-			mask := roundedRectMask(w, h, radiusInt)
+			mask := roundedRectMaskAA(w, h, radiusInt)
 			draw.DrawMask(result, bounds, img, bounds.Min, mask, image.Point{}, draw.Over)
 			img = result
 			contentType = "image/png"
+			rounded = true
 		}
 	}
 
-	if sizeStr != "" {
-		if sz, err := strconv.Atoi(sizeStr); err == nil && sz > 0 && sz <= 256 {
-			resized := resize.Resize(uint(sz), 0, img, resize.Lanczos3)
-			buf := avatarBufPool.Get().(*bytes.Buffer)
-			buf.Reset()
-			defer avatarBufPool.Put(buf)
-			if contentType == "image/png" {
-				png.Encode(buf, resized)
-			} else {
-				jpeg.Encode(buf, resized, &jpeg.Options{Quality: 85})
-				contentType = "image/jpeg"
-			}
-			imageData = make([]byte, buf.Len())
-			copy(imageData, buf.Bytes())
-		} else {
-			if radiusStr != "" {
-				buf := avatarBufPool.Get().(*bytes.Buffer)
-				buf.Reset()
-				defer avatarBufPool.Put(buf)
-				if contentType == "image/png" {
-					png.Encode(buf, img)
-				} else {
-					jpeg.Encode(buf, img, &jpeg.Options{Quality: 85})
-				}
-				imageData = make([]byte, buf.Len())
-				copy(imageData, buf.Bytes())
-			}
-		}
-	} else if radiusStr != "" {
+	if resized || rounded {
 		buf := avatarBufPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer avatarBufPool.Put(buf)
@@ -447,6 +434,7 @@ func avatarHandler(c *gin.Context) {
 			png.Encode(buf, img)
 		} else {
 			jpeg.Encode(buf, img, &jpeg.Options{Quality: 85})
+			contentType = "image/jpeg"
 		}
 		imageData = make([]byte, buf.Len())
 		copy(imageData, buf.Bytes())

@@ -12,6 +12,7 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"math"
 	"sync"
 
 	"github.com/esimov/colorquant"
@@ -162,6 +163,44 @@ func roundedRectMask(w, h, radius int) *image.Alpha {
 	return mask
 }
 
+func roundedRectMaskAA(w, h, radius int) *image.Alpha {
+	mask := image.NewAlpha(image.Rect(0, 0, w, h))
+	for i := range mask.Pix {
+		mask.Pix[i] = 255
+	}
+
+	if radius <= 0 {
+		return mask
+	}
+	if radius > w/2 {
+		radius = w / 2
+	}
+	if radius > h/2 {
+		radius = h / 2
+	}
+
+	rf := float64(radius)
+	for y := 0; y < radius; y++ {
+		dy := float64(y) + 0.5 - rf
+		for x := 0; x < radius; x++ {
+			dx := float64(x) + 0.5 - rf
+			cov := rf - math.Sqrt(dx*dx+dy*dy) + 0.5
+			if cov < 0 {
+				cov = 0
+			} else if cov > 1 {
+				cov = 1
+			}
+			v := uint8(cov * 255)
+			mask.Pix[y*mask.Stride+x] = v
+			mask.Pix[y*mask.Stride+(w-1-x)] = v
+			mask.Pix[(h-1-y)*mask.Stride+x] = v
+			mask.Pix[(h-1-y)*mask.Stride+(w-1-x)] = v
+		}
+	}
+
+	return mask
+}
+
 func roundCorners(imgData []byte, radius int) ([]byte, string, error) {
 	img, _, err := image.Decode(bytes.NewReader(imgData))
 	if err != nil {
@@ -175,7 +214,7 @@ func roundCorners(imgData []byte, radius int) ([]byte, string, error) {
 	}
 
 	result := image.NewRGBA(bounds)
-	mask := roundedRectMask(w, h, radius)
+	mask := roundedRectMaskAA(w, h, radius)
 	draw.DrawMask(result, bounds, img, bounds.Min, mask, image.Point{}, draw.Over)
 
 	buf := avatarBufPool.Get().(*bytes.Buffer)
