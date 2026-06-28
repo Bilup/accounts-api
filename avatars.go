@@ -404,10 +404,10 @@ func avatarHandler(c *gin.Context) {
 				radiusInt = h / 2
 			}
 			result := image.NewRGBA(bounds)
-			draw.Draw(result, bounds, img, bounds.Min, draw.Src)
 			mask := roundedRectMask(w, h, radiusInt)
-			draw.DrawMask(result, bounds, result, bounds.Min, mask, image.Point{}, draw.Over)
+			draw.DrawMask(result, bounds, img, bounds.Min, mask, image.Point{}, draw.Over)
 			img = result
+			contentType = "image/png"
 		}
 	}
 

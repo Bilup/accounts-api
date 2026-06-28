@@ -175,9 +175,8 @@ func roundCorners(imgData []byte, radius int) ([]byte, string, error) {
 	}
 
 	result := image.NewRGBA(bounds)
-	draw.Draw(result, bounds, img, bounds.Min, draw.Src)
 	mask := roundedRectMask(w, h, radius)
-	draw.DrawMask(result, bounds, result, bounds.Min, mask, image.Point{}, draw.Over)
+	draw.DrawMask(result, bounds, img, bounds.Min, mask, image.Point{}, draw.Over)
 
 	buf := avatarBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
