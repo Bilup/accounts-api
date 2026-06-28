@@ -378,6 +378,7 @@ func main() {
 	{
 		status.GET("/ws", statusWSHandler)
 		status.GET("/get", statusGetHTTP)
+		status.POST("/set", requiresAuth, statusSetHTTP)
 	}
 
 	// DevFund endpoints

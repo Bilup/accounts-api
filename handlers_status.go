@@ -80,6 +80,7 @@ func (c *Conn) readPump(ws *websocket.Conn) {
 			c.handleRemoveActivity(msg)
 		case "room_state":
 			c.handleRoomState(msg)
+		case "ping":
 		default:
 			c.sendError("unknown command")
 		}
@@ -564,6 +565,95 @@ func (c *Conn) handleRoomState(msg map[string]json.RawMessage) {
 		"room":    room,
 		"members": snapshot,
 	})
+}
+
+func statusSetHTTP(c *gin.Context) {
+	user := currentUser(c)
+	uid := user.GetId()
+
+	var body struct {
+		Status   *string `json:"status"`
+		Presence *string `json:"presence"`
+	}
+	if !bindJSON(c, &body) {
+		return
+	}
+
+	if body.Status == nil && body.Presence == nil {
+		c.JSON(400, gin.H{"error": "status or presence required"})
+		return
+	}
+
+	if body.Status != nil && len(*body.Status) > maxStatusLen {
+		c.JSON(400, gin.H{"error": "status too long"})
+		return
+	}
+
+	var presence Presence
+	if body.Presence != nil {
+		presence = Presence(strings.ToLower(*body.Presence))
+		switch presence {
+		case PresenceOnline, PresenceIdle, PresenceDND, PresenceInvisible:
+		default:
+			c.JSON(400, gin.H{"error": "invalid presence value"})
+			return
+		}
+	}
+
+	hub.Lock()
+	us := hub.userStatus[uid]
+	if us == nil {
+		us = &UserStatus{Presence: PresenceOnline, Activities: make(map[string]Activity)}
+		hub.userStatus[uid] = us
+	}
+
+	oldMerged := hub.mergedPresenceLocked(uid)
+
+	if body.Presence != nil {
+		us.Presence = presence
+	}
+	if body.Status != nil {
+		us.Status = *body.Status
+	}
+
+	newMerged := hub.mergedPresenceLocked(uid)
+	roomNames := hub.allRoomsForUserLocked(uid)
+	hub.persistStatusLocked(uid, us)
+	hub.Unlock()
+
+	wasVisible := oldMerged.visible()
+	nowVisible := newMerged.visible()
+
+	if wasVisible && !nowVisible {
+		for _, name := range roomNames {
+			hub.broadcast(name, "member_leave", map[string]any{
+				"room":    name,
+				"user_id": string(uid),
+			}, "")
+		}
+	} else if !wasVisible && nowVisible {
+		hub.Lock()
+		state := hub.mergedStateLocked(uid)
+		username := ""
+		if conns := hub.userConns[uid]; len(conns) > 0 {
+			username = string(conns[0].username)
+		}
+		hub.Unlock()
+		for _, name := range roomNames {
+			hub.broadcast(name, "member_join", map[string]any{
+				"room":       name,
+				"user_id":    string(uid),
+				"username":   username,
+				"status":     state.Status,
+				"presence":   string(state.Presence),
+				"activities": state.Activities,
+			}, "")
+		}
+	} else {
+		hub.broadcastStatusToAllRooms(uid, roomNames)
+	}
+
+	c.JSON(200, gin.H{"ok": true})
 }
 
 func statusGetHTTP(c *gin.Context) {
