@@ -59,7 +59,7 @@ func TestValidateUsername_Spaces(t *testing.T) {
 }
 
 func TestValidateUsername_InvalidChars(t *testing.T) {
-	invalidUsernames := []string{"hello!", "user@name", "test.name", "user name", "hello世界", "user$"}
+	invalidUsernames := []string{"hello!", "user@name", ".testname", "-username", "username-", "user name", "hello世界", "user$"}
 	for _, username := range invalidUsernames {
 		ok, _ := ValidateUsername(Username(username))
 		if ok {
@@ -69,7 +69,7 @@ func TestValidateUsername_InvalidChars(t *testing.T) {
 }
 
 func TestValidateUsername_ValidChars(t *testing.T) {
-	validUsernames := []string{"hello", "user123", "test_user", "abc_def_123", "a_b_c"}
+	validUsernames := []string{"hello", "user123", "test_user", "abc_def_123", "a_b_c", "test.name", "test-name", "test.name-1", "test-name."}
 	for _, username := range validUsernames {
 		ok, msg := ValidateUsername(Username(username))
 		if !ok {

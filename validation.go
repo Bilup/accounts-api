@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	usernameAllowedRe = regexp.MustCompile("^[a-z0-9_]+$")
+	usernameAllowedRe = regexp.MustCompile("^[a-z0-9_][a-z0-9_.-]*[a-z0-9_.]$")
 	bannedWordsOnce   sync.Once
 	bannedWords       []string
 	bannedWordsErr    error

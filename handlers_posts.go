@@ -70,7 +70,7 @@ var postLimits = map[string]int{
 	"attachment_length":      200,
 }
 
-var mentionRe = regexp.MustCompile(`@([a-zA-Z0-9_-]{1,30})`)
+var mentionRe = regexp.MustCompile(`@([a-zA-Z0-9_.-]{1,30})`)
 
 func validateAttachmentURL(url string) string {
 	if len(url) > postLimits["attachment_length"] {
