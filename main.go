@@ -46,6 +46,7 @@ func main() {
 	go watchBadgesFile()
 	go cleanExpiredGifts()
 	go cleanExpiredSubTokens()
+	go cleanUnverifiedAccounts()
 	go startStandingRecoveryChecker()
 	StartValidatorCleanup()
 

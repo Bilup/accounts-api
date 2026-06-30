@@ -158,6 +158,41 @@ func resendVerificationHandler(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "Verification email sent"})
 }
 
+const emailVerificationLaunchMs int64 = 1779206945000
+
+func unverifiedAccountsToDelete(nowMs int64) []Username {
+	cutoff := nowMs - 24*60*60*1000
+	var toDelete []Username
+	usersMutex.RLock()
+	for i := range users {
+		if users[i].Get("sys.email_verified") == true {
+			continue
+		}
+		created := users[i].GetCreated()
+		if created < emailVerificationLaunchMs {
+			continue
+		}
+		if created < cutoff {
+			toDelete = append(toDelete, users[i].GetUsername())
+		}
+	}
+	usersMutex.RUnlock()
+	return toDelete
+}
+
+func cleanUnverifiedAccounts() {
+	for {
+		time.Sleep(1 * time.Hour)
+		toDelete := unverifiedAccountsToDelete(time.Now().UnixMilli())
+		for _, username := range toDelete {
+			log.Printf("[cleanup] deleting unverified account %s", username)
+			if err := performUserDeletion(username, false, false); err != nil {
+				log.Printf("[cleanup] failed to delete unverified account %s: %v", username, err)
+			}
+		}
+	}
+}
+
 func changePasswordHandler(c *gin.Context) {
 	user := currentUser(c)
 	var req struct {

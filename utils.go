@@ -445,6 +445,34 @@ func getRateLimitKey(c *gin.Context) string {
 	return "unknown_client"
 }
 
+var accountGateAllowedPaths = map[string]bool{
+	"/accept_tos":             true,
+	"/me/resend_verification": true,
+}
+
+func accountGateBlocks(c *gin.Context, user *User) bool {
+	if accountGateAllowedPaths[c.FullPath()] {
+		return false
+	}
+	if v, ok := (*user)["sys.email_verified"]; ok && v == false {
+		c.JSON(403, gin.H{
+			"error":              "Email address not verified",
+			"sys.email_verified": false,
+		})
+		c.Abort()
+		return true
+	}
+	if user.Get("sys.tos_accepted") != true {
+		c.JSON(403, gin.H{
+			"error":            "Terms-Of-Service are not accepted or outdated",
+			"sys.tos_accepted": false,
+		})
+		c.Abort()
+		return true
+	}
+	return false
+}
+
 func requiresAuth(c *gin.Context) {
 	authKey := extractAuthKey(c)
 	if authKey == "" {
@@ -463,6 +491,9 @@ func requiresAuth(c *gin.Context) {
 		user.GetSubscription()
 		c.Set("user", user)
 		c.Set("token_type", "main")
+		if accountGateBlocks(c, user) {
+			return
+		}
 		c.Next()
 		return
 	}
@@ -482,6 +513,9 @@ func requiresAuth(c *gin.Context) {
 	c.Set("user", subUser)
 	c.Set("token_type", "sub")
 	c.Set("sub_token", subToken)
+	if accountGateBlocks(c, subUser) {
+		return
+	}
 	c.Next()
 }
 
