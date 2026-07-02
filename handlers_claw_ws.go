@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"net/url"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -311,33 +308,6 @@ func latestPublicPosts(limit int) []NetPost {
 	return out
 }
 
-type clawRealtimeEventRequest struct {
-	EventType string `json:"event_type"`
-	Data      any    `json:"data"`
-	From      string `json:"from,omitempty"`
-}
-
-func clawRealtimeEventHandler(c *gin.Context) {
-	token := c.Query("token")
-	if expected := strings.TrimSpace(os.Getenv("CLAW_API_TOKEN")); expected != "" && token != expected {
-		c.JSON(401, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	var req clawRealtimeEventRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid JSON"})
-		return
-	}
-	if req.EventType == "" || req.Data == nil {
-		c.JSON(400, gin.H{"error": "Message must contain 'event_type' and 'data' fields"})
-		return
-	}
-
-	clawRealtimeReceiveEvent(req.EventType, req.Data)
-	c.JSON(200, gin.H{"success": true, "clients": clawHub.clientCount()})
-}
-
 func clawRealtimeReceiveEvent(eventType string, data any) {
 	if eventType == "" {
 		return
@@ -370,28 +340,4 @@ func startClawRealtimeServers() {
 			log.Fatalf("[ClawWS] failed to start WebSocket server: %v", err)
 		}
 	}()
-
-	events := gin.New()
-	events.Use(gin.Recovery())
-	events.POST("/event", clawRealtimeEventHandler)
-
-	go func() {
-		log.Println("[ClawWS] HTTP event receiver starting on port 5611...")
-		if err := events.Run("127.0.0.1:5611"); err != nil {
-			log.Fatalf("[ClawWS] failed to start HTTP event receiver: %v", err)
-		}
-	}()
-}
-
-func isLocalClawRealtimeURL(raw string) bool {
-	if raw == "" {
-		return true
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return false
-	}
-	host := strings.ToLower(u.Hostname())
-	port := u.Port()
-	return (host == "127.0.0.1" || host == "localhost" || host == "::1") && (port == "5611" || port == "")
 }

@@ -131,11 +131,7 @@ func createEventPayload(eventType string, data any) map[string]any {
 
 func broadcastClawEvent(eventType string, data any) bool {
 	clawRealtimeReceiveEvent(eventType, data)
-	if isLocalClawRealtimeURL(WEBSOCKET_SERVER_URL) {
-		return true
-	}
-	payload := createEventPayload(eventType, data)
-	return makeHTTPRequest("POST", WEBSOCKET_SERVER_URL, payload, 2*time.Second, "WebSocket", 200)
+	return true
 }
 
 func sendPostToDiscord(postData NetPost) {

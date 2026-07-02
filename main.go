@@ -377,7 +377,6 @@ func main() {
 
 	r.GET("/ws", statusWSHandler)
 	r.GET("/claw/ws", clawWSHandler)
-	r.POST("/claw/event", clawRealtimeEventHandler)
 
 	status := r.Group("/status")
 	{

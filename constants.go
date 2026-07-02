@@ -23,7 +23,6 @@ var (
 	USERDATA_PATH                 string
 	COSMETICS_FILE_PATH           string
 	COSMETICS_ASSETS_PATH         string
-	WEBSOCKET_SERVER_URL          string
 	EVENT_SERVER_URL              string
 	SUBSCRIPTION_CHECK_INTERVAL   int
 	INACTIVITY_TAX_CHECK_INTERVAL int
@@ -104,7 +103,6 @@ func loadConfigFromEnv() {
 	SYSTEMS_FILE_PATH = mustEnv("SYSTEMS_FILE_PATH", "./systems.json")
 
 	// External services
-	WEBSOCKET_SERVER_URL = mustEnv("WEBSOCKET_SERVER_URL", "")
 	EVENT_SERVER_URL = mustEnv("EVENT_SERVER_URL", "")
 	BANNED_WORDS_URL = mustEnv("BANNED_WORDS_URL", "")
 
