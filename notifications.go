@@ -130,6 +130,10 @@ func createEventPayload(eventType string, data any) map[string]any {
 }
 
 func broadcastClawEvent(eventType string, data any) bool {
+	clawRealtimeReceiveEvent(eventType, data)
+	if isLocalClawRealtimeURL(WEBSOCKET_SERVER_URL) {
+		return true
+	}
 	payload := createEventPayload(eventType, data)
 	return makeHTTPRequest("POST", WEBSOCKET_SERVER_URL, payload, 2*time.Second, "WebSocket", 200)
 }
@@ -207,18 +211,6 @@ func getPostRepliesSnapshot(postID string) []Reply {
 
 func addUserEvent(userId UserId, eventType string, data map[string]any) Event {
 	switch eventType {
-	case "follow":
-		followersCount := 0
-		switch v := data["followers"].(type) {
-		case []string:
-			followersCount = len(v)
-		case []any:
-			followersCount = len(v)
-		}
-		go broadcastClawEvent("followers", map[string]any{
-			"username":  userId.User().GetUsername(),
-			"followers": followersCount,
-		})
 	case "reply":
 		postID, _ := data["post_id"].(string)
 		if postID != "" {
@@ -236,8 +228,6 @@ func addUserEvent(userId UserId, eventType string, data map[string]any) Event {
 	}
 
 	eventsHistoryMutex.Lock()
-	defer eventsHistoryMutex.Unlock()
-
 	if eventsHistory[userId] == nil {
 		eventsHistory[userId] = make([]Event, 0)
 	}
@@ -254,8 +244,10 @@ func addUserEvent(userId UserId, eventType string, data map[string]any) Event {
 	if len(eventsHistory[userId]) > 100 {
 		eventsHistory[userId] = eventsHistory[userId][len(eventsHistory[userId])-100:]
 	}
+	eventsHistoryMutex.Unlock()
 
 	go saveEventsHistory()
+	clawRealtimeSendUserEvent(userId, newEvent)
 
 	return newEvent
 }

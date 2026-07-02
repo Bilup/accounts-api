@@ -566,13 +566,16 @@ func ratePost(c *gin.Context) {
 	}
 
 	userId := user.GetId()
+	postOwner := targetPost.User
 
 	var likesSnapshot []UserId
 	var profileOnly bool
+	liked := false
 	if !mutatePostByID(postID, func(p *Post) {
 		if rating == 1 {
 			if !slices.Contains(p.Likes, userId) {
 				p.Likes = append(p.Likes, userId)
+				liked = true
 			}
 		} else {
 			newLikes := make([]UserId, 0, len(p.Likes))
@@ -602,6 +605,20 @@ func ratePost(c *gin.Context) {
 			"id":   postID,
 			"key":  "likes",
 			"data": likes,
+		})
+		if liked {
+			go broadcastClawEvent("new_like", map[string]any{
+				"post_id": postID,
+				"user":    user.GetUsername(),
+				"likes":   likes,
+			})
+		}
+	}
+
+	if liked && postOwner != userId {
+		addUserEvent(postOwner, "like", map[string]any{
+			"post_id": postID,
+			"user":    userId,
 		})
 	}
 

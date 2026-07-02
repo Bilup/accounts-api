@@ -65,6 +65,8 @@ func main() {
 
 	r.Use(corsMiddleware())
 
+	startClawRealtimeServers()
+
 	// Posts endpoints
 	r.GET("/post", rateLimit("default"), requiresAuth, requirePermission(PermCreatePost), requireStanding(StandingGood), createPost)
 	r.GET("/limits", getLimits)
@@ -374,6 +376,8 @@ func main() {
 	}
 
 	r.GET("/ws", statusWSHandler)
+	r.GET("/claw/ws", clawWSHandler)
+	r.POST("/claw/event", clawRealtimeEventHandler)
 
 	status := r.Group("/status")
 	{
