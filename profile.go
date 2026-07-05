@@ -342,16 +342,15 @@ func getProfile(c *gin.Context) {
 		Subscription: sub,
 		Theme:        foundUser.GetTheme(),
 		GroupTag: func() string {
-			if gid, ok := foundUser["sys.group"]; ok {
-				if id, ok := gid.(string); ok && id != "" {
-					groupsDataMutex.RLock()
-					for tag, data := range groupsData {
-						if string(data.Group.Id) == id {
-							groupsDataMutex.RUnlock()
-							return tag
-						}
-					}
-					groupsDataMutex.RUnlock()
+			id := foundUser.GetString("sys.group")
+			if id == "" {
+				return ""
+			}
+			groupsDataMutex.RLock()
+			defer groupsDataMutex.RUnlock()
+			for tag, data := range groupsData {
+				if string(data.Group.Id) == id {
+					return tag
 				}
 			}
 			return ""

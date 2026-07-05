@@ -49,7 +49,7 @@ func getUserGroupTagCached(username Username) string {
 	}
 	tag = ""
 	if user, err := getAccountByUsername(username); err == nil {
-		if gid, ok := user["sys.group"].(string); ok && gid != "" {
+		if gid := user.GetString("sys.group"); gid != "" {
 			groupsDataMutex.RLock()
 			for t, data := range groupsData {
 				if string(data.Group.Id) == gid {

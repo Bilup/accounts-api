@@ -269,7 +269,7 @@ func getUser(c *gin.Context) {
 			return
 		}
 
-		if v, ok := foundUser["sys.email_verified"]; ok && v == false {
+		if foundUser.Get("sys.email_verified") == false {
 			c.JSON(403, gin.H{
 				"error":              "Email address not verified",
 				"username":           foundUser.GetUsername(),
@@ -413,17 +413,15 @@ func userToProfileOnly(user User, subTokenValue string) map[string]any {
 		profileData["banner"] = bannerURL(string(username))
 	}
 	// Resolve group tag
-	if gid, ok := user["sys.group"]; ok {
-		if id, ok := gid.(string); ok && id != "" {
-			groupsDataMutex.RLock()
-			for tag, data := range groupsData {
-				if string(data.Group.Id) == id {
-					profileData["group_tag"] = tag
-					break
-				}
+	if id := user.GetString("sys.group"); id != "" {
+		groupsDataMutex.RLock()
+		for tag, data := range groupsData {
+			if string(data.Group.Id) == id {
+				profileData["group_tag"] = tag
+				break
 			}
-			groupsDataMutex.RUnlock()
 		}
+		groupsDataMutex.RUnlock()
 	}
 	return profileData
 }

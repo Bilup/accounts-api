@@ -454,7 +454,7 @@ func accountGateBlocks(c *gin.Context, user *User) bool {
 	if accountGateAllowedPaths[c.FullPath()] {
 		return false
 	}
-	if v, ok := (*user)["sys.email_verified"]; ok && v == false {
+	if user.Get("sys.email_verified") == false {
 		c.JSON(403, gin.H{
 			"error":              "Email address not verified",
 			"sys.email_verified": false,
