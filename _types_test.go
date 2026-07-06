@@ -536,3 +536,86 @@ func TestGift_CannotBeCancelled_Expired(t *testing.T) {
 		t.Error("Expired gift should not be cancellable")
 	}
 }
+
+func TestUser_GetSubscription_NormalizesDriveTierToPro(t *testing.T) {
+	u := User{
+		"username": "driveuser",
+		"sys.subscription": map[string]any{
+			"active":       true,
+			"tier":         "Drive",
+			"next_billing": time.Now().Add(time.Hour).UnixMilli(),
+		},
+	}
+
+	if got := u.GetSubscription().Tier; got != "Pro" {
+		t.Errorf("GetSubscription().Tier = %q, want %q", got, "Pro")
+	}
+}
+
+func TestUser_SetSubscription_NormalizesDriveTierToPro(t *testing.T) {
+	u := User{"username": "driveuser"}
+	u.SetSubscription(subscription{
+		Active:       true,
+		Tier:         "Drive",
+		Next_billing: time.Now().Add(time.Hour).UnixMilli(),
+	})
+
+	sub, ok := u.Get("sys.subscription").(map[string]any)
+	if !ok {
+		t.Fatalf("sys.subscription = %T, want map[string]any", u.Get("sys.subscription"))
+	}
+	if got := sub["tier"]; got != "Pro" {
+		t.Errorf("stored subscription tier = %q, want %q", got, "Pro")
+	}
+}
+
+func TestUserToNet_NormalizesDriveSubscriptionTier(t *testing.T) {
+	u := User{
+		"username": "driveuser",
+		"sys.subscription": map[string]any{
+			"active":       true,
+			"tier":         "Drive",
+			"next_billing": time.Now().Add(time.Hour).UnixMilli(),
+		},
+	}
+
+	netUser := userToNet(u)
+	sub, ok := netUser["sys.subscription"].(map[string]any)
+	if !ok {
+		t.Fatalf("net sys.subscription = %T, want map[string]any", netUser["sys.subscription"])
+	}
+	if got := sub["tier"]; got != "Pro" {
+		t.Errorf("net subscription tier = %q, want %q", got, "Pro")
+	}
+	if got := u["sys.subscription"].(map[string]any)["tier"]; got != "Drive" {
+		t.Errorf("original subscription tier = %q, want %q", got, "Drive")
+	}
+}
+
+func TestGetUserTierCached_NormalizesCachedDriveTier(t *testing.T) {
+	username := Username("driveuser")
+	userTierCacheMu.Lock()
+	oldCache := userTierCache
+	userTierCache = map[Username]string{username: "Drive"}
+	userTierCacheMu.Unlock()
+	t.Cleanup(func() {
+		userTierCacheMu.Lock()
+		userTierCache = oldCache
+		userTierCacheMu.Unlock()
+	})
+
+	tier, ok := getUserTierCached(username)
+	if !ok {
+		t.Fatal("getUserTierCached returned ok=false, want true")
+	}
+	if tier != "Pro" {
+		t.Errorf("getUserTierCached tier = %q, want %q", tier, "Pro")
+	}
+
+	userTierCacheMu.RLock()
+	cached := userTierCache[username]
+	userTierCacheMu.RUnlock()
+	if cached != "Pro" {
+		t.Errorf("cached tier = %q, want %q", cached, "Pro")
+	}
+}

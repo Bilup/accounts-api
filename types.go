@@ -472,6 +472,21 @@ var subs_benefits = map[string]sub_benefits{
 	"max":   tierMax(),
 }
 
+func normalizeSubscriptionTier(tier string) string {
+	switch strings.ToLower(strings.TrimSpace(tier)) {
+	case "lite":
+		return "Lite"
+	case "plus":
+		return "Plus"
+	case "drive", "pro":
+		return "Pro"
+	case "max":
+		return "Max"
+	default:
+		return "Free"
+	}
+}
+
 func tierFree() sub_benefits {
 	benefits := sub_benefits{
 		Max_Keys:                5,
@@ -1036,7 +1051,7 @@ func (u User) GetSubscription() subscription {
 		return val
 	}
 	val.Active = sub["active"] == true
-	val.Tier = getStringOrDefault(sub["tier"], "Free")
+	val.Tier = normalizeSubscriptionTier(getStringOrDefault(sub["tier"], "Free"))
 	val.Next_billing = int64(getIntOrDefault(sub["next_billing"], 0))
 
 	if val.Next_billing == 0 {
@@ -1071,8 +1086,12 @@ func (u User) GetSubscription() subscription {
 }
 
 func (u User) GetSubscriptionBenefits() sub_benefits {
-	tier := u.GetSubscription().Tier
-	return subs_benefits[strings.ToLower(tier)]
+	tier := strings.ToLower(normalizeSubscriptionTier(u.GetSubscription().Tier))
+	benefits, ok := subs_benefits[tier]
+	if !ok {
+		return tierFree()
+	}
+	return benefits
 }
 
 func (u User) GetBlockedIps() []string {
@@ -1089,6 +1108,7 @@ func (u User) SetSocialLinks(links []string) {
 }
 
 func (u User) SetSubscription(sub subscription) {
+	sub.Tier = normalizeSubscriptionTier(sub.Tier)
 	u.Set("sys.subscription", map[string]any{
 		"active":       sub.Active,
 		"tier":         sub.Tier,

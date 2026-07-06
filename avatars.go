@@ -100,7 +100,13 @@ func getUserTierCached(username Username) (string, bool) {
 		if tier == "" {
 			return "", false
 		}
-		return tier, true
+		normalizedTier := normalizeSubscriptionTier(tier)
+		if normalizedTier != tier {
+			userTierCacheMu.Lock()
+			userTierCache[username] = normalizedTier
+			userTierCacheMu.Unlock()
+		}
+		return normalizedTier, true
 	}
 	user, err := getAccountByUsername(Username(username))
 	userTierCacheMu.Lock()
@@ -193,17 +199,25 @@ func clearOverlayCosmeticsCache() {
 	overlayCosmeticsCacheMu.Unlock()
 }
 
+func imageContentTypeForExt(ext string) string {
+	switch ext {
+	case ".gif":
+		return "image/gif"
+	case ".png":
+		return "image/png"
+	default:
+		return "image/jpeg"
+	}
+}
+
 func getAvatarMetadata(username Username) (filePath, contentType, etag string, err error) {
 	base := username.ToLower()
-	for _, ext := range []string{".gif", ".jpg"} {
+	for _, ext := range []string{"", ".gif", ".jpg", ".png"} {
 		fp := filepath.Join(avatarBaseDir, string(base)+ext)
 		info, statErr := os.Stat(fp)
 		if statErr == nil {
-			ct := "image/jpeg"
-			if ext == ".gif" {
-				ct = "image/gif"
-			}
-			return fp, ct, fmt.Sprintf("%s-%d", base, info.ModTime().Unix()), nil
+			ct := getStoredImageContentType(fp, imageContentTypeForExt(ext))
+			return fp, ct, fmt.Sprintf("%s-%d", base, info.ModTime().UnixNano()), nil
 		}
 	}
 	return "", "", "", os.ErrNotExist
@@ -211,7 +225,7 @@ func getAvatarMetadata(username Username) (filePath, contentType, etag string, e
 
 func deleteAvatars(username Username) {
 	base := username.ToLower()
-	for _, ext := range []string{".gif", ".jpg"} {
+	for _, ext := range []string{"", ".gif", ".jpg", ".png"} {
 		os.Remove(filepath.Join(avatarBaseDir, string(base)+ext))
 	}
 }
@@ -531,6 +545,20 @@ func writeResizedJPEG(imageData []byte, w, h uint, destPath string) error {
 	return jpeg.Encode(out, resized, &jpeg.Options{Quality: 85})
 }
 
+func writeResizedPNG(imageData []byte, w, h uint, destPath string) error {
+	img, _, err := image.Decode(bytes.NewReader(imageData))
+	if err != nil {
+		return err
+	}
+	resized := resize.Resize(w, h, img, resize.Lanczos3)
+	out, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	return png.Encode(out, resized)
+}
+
 func checkImageDimensions(imageData []byte) error {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(imageData))
 	if err != nil {
@@ -557,29 +585,17 @@ func savePfp(dataURI string, user *User) error {
 	}
 	os.MkdirAll(avatarBaseDir, 0755)
 	username := user.GetUsername().ToLower()
-	tier := strings.ToLower(user.GetSubscription().Tier)
-	benefits := subs_benefits[tier]
 
-	var ext, contentType string
-	switch {
-	case strings.Contains(mimeHeader, "image/gif"):
-		if benefits.Has_Animated_Pfp {
-			ext = ".gif"
-			contentType = "image/gif"
-		} else {
-			ext = ".jpg"
-			contentType = "image/jpeg"
-		}
-	default:
-		ext = ".jpg"
-		contentType = "image/jpeg"
+	contentType := "image/jpeg"
+	if strings.Contains(mimeHeader, "image/gif") {
+		contentType = "image/gif"
 	}
 
 	deleteAvatars(username)
 
 	invalidateAvatarCacheForUser(string(username))
 
-	filePath := filepath.Join(avatarBaseDir, string(username)+ext)
+	filePath := filepath.Join(avatarBaseDir, string(username))
 
 	if contentType == "image/gif" {
 		resizedData, err := resizeGIF(imageData, 256, 256)
@@ -647,20 +663,38 @@ func uploadPfpHandler(c *gin.Context) {
 
 // --- Banner handler ---
 
+func getStoredImageContentType(path, fallback string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return fallback
+	}
+	defer f.Close()
+
+	buf := make([]byte, 512)
+	n, err := f.Read(buf)
+	if err != nil && err != io.EOF {
+		return fallback
+	}
+	switch http.DetectContentType(buf[:n]) {
+	case "image/gif":
+		return "image/gif"
+	case "image/png":
+		return "image/png"
+	case "image/jpeg":
+		return "image/jpeg"
+	default:
+		return fallback
+	}
+}
+
 func getBannerPath(username Username) (string, string, string, time.Time, error) {
 	base := username.ToLower()
-	for _, ext := range []string{".gif", ".jpg", ".png"} {
+	for _, ext := range []string{"", ".gif", ".jpg", ".png"} {
 		fp := filepath.Join(bannerBaseDir, string(base)+ext)
 		fi, err := os.Stat(fp)
 		if err == nil {
-			ct := "image/jpeg"
-			switch ext {
-			case ".gif":
-				ct = "image/gif"
-			case ".png":
-				ct = "image/png"
-			}
-			return fp, ct, fmt.Sprintf("%s-%d", base, fi.ModTime().Unix()), fi.ModTime(), nil
+			ct := getStoredImageContentType(fp, imageContentTypeForExt(ext))
+			return fp, ct, fmt.Sprintf("%s-%d", base, fi.ModTime().UnixNano()), fi.ModTime(), nil
 		}
 	}
 	return "", "", "", time.Time{}, os.ErrNotExist
@@ -668,7 +702,7 @@ func getBannerPath(username Username) (string, string, string, time.Time, error)
 
 func deleteBanners(username Username) {
 	base := username.ToLower()
-	for _, ext := range []string{".gif", ".jpg", ".png"} {
+	for _, ext := range []string{"", ".gif", ".jpg", ".png"} {
 		os.Remove(filepath.Join(bannerBaseDir, string(base)+ext))
 	}
 }
@@ -861,32 +895,19 @@ func saveBanner(dataURI string, user *User) error {
 	if err := checkImageDimensions(imageData); err != nil {
 		return err
 	}
-	tier := strings.ToLower(user.GetSubscription().Tier)
-	benefits := subs_benefits[tier]
-
-	var ext, contentType string
+	contentType := "image/jpeg"
 	switch {
 	case strings.Contains(mimeHeader, "image/gif"):
-		if benefits.Has_Animated_Banner {
-			ext = ".gif"
-			contentType = "image/gif"
-		} else {
-			ext = ".jpg"
-			contentType = "image/jpeg"
-		}
+		contentType = "image/gif"
 	case strings.Contains(mimeHeader, "image/png"):
-		ext = ".png"
 		contentType = "image/png"
-	default:
-		ext = ".jpg"
-		contentType = "image/jpeg"
 	}
 
 	username := user.GetUsername().ToLower()
 	os.MkdirAll(bannerBaseDir, 0755)
 	deleteBanners(username)
 
-	filePath := filepath.Join(bannerBaseDir, string(username)+ext)
+	filePath := filepath.Join(bannerBaseDir, string(username))
 
 	if contentType == "image/gif" {
 		resizedData, err := resizeGIF(imageData, 900, 300)
@@ -895,6 +916,10 @@ func saveBanner(dataURI string, user *User) error {
 		}
 		if err := os.WriteFile(filePath, resizedData, 0644); err != nil {
 			return fmt.Errorf("error saving GIF: %w", err)
+		}
+	} else if contentType == "image/png" {
+		if err := writeResizedPNG(imageData, 900, 300, filePath); err != nil {
+			return fmt.Errorf("error encoding banner: %w", err)
 		}
 	} else {
 		if err := writeResizedJPEG(imageData, 900, 300, filePath); err != nil {

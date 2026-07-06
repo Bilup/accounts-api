@@ -68,7 +68,7 @@ func loadUsers() {
 			if m, ok := sub.(map[string]any); ok {
 				if t, ok := m["tier"]; ok {
 					if s, ok := t.(string); ok && s != "" {
-						tier = s
+						tier = normalizeSubscriptionTier(s)
 					}
 				}
 			}

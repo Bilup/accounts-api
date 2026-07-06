@@ -355,6 +355,14 @@ func userToNet(user User) User {
 		netTransactions[i] = transaction.ToNet()
 	}
 	userCopy["sys.transactions"] = netTransactions
+	if sub, ok := userCopy["sys.subscription"].(map[string]any); ok {
+		subCopy := make(map[string]any, len(sub))
+		for k, v := range sub {
+			subCopy[k] = v
+		}
+		subCopy["tier"] = user.GetSubscription().Tier
+		userCopy["sys.subscription"] = subCopy
+	}
 
 	if userCopy["sys.banner"] != nil || userCopy["banner"] != nil {
 		userCopy["banner"] = bannerURL(string(user.GetUsername()))
@@ -766,12 +774,6 @@ func updateUser(c *gin.Context) {
 		}
 		benefits := user.GetSubscriptionBenefits()
 		freeAndGifUploads := benefits.Has_Free_Banner_Uploads
-		if strings.Contains(imageData, "data:image/gif;base64,") {
-			if !benefits.Has_Animated_Banner {
-				c.JSON(400, gin.H{"error": "GIFs are only available to Pro users"})
-				return
-			}
-		}
 		var currencyFloat float64 = user.GetCredits()
 		if currencyFloat < 10 && !freeAndGifUploads {
 			c.JSON(403, gin.H{"error": "Not enough credits to set banner (10 required)"})
@@ -800,14 +802,6 @@ func updateUser(c *gin.Context) {
 			c.JSON(400, gin.H{"error": "Profile picture must be a valid data URI"})
 			return
 		}
-		if strings.Contains(imageData, "data:image/gif;base64,") {
-			benefits := user.GetSubscriptionBenefits()
-			if !benefits.Has_Animated_Pfp {
-				c.JSON(400, gin.H{"error": "GIFs are only available to Pro users"})
-				return
-			}
-		}
-
 		if err := savePfp(imageData, user); err != nil {
 			serverError(c, err)
 			return
@@ -1493,9 +1487,9 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 func deleteUserAvatar(username Username) {
 	usernameLower := username.ToLower()
 
-	types := []string{".jpg", ".gif", ".png"}
+	fileTypes := []string{"", ".jpg", ".gif", ".png"}
 
-	for _, fileType := range types {
+	for _, fileType := range fileTypes {
 		filePath := "rotur/avatars/" + string(usernameLower) + fileType
 		if fileExists(filePath) {
 			os.Remove(filePath)
@@ -1512,7 +1506,7 @@ func renameUserAvatar(oldUsername, newUsername Username) {
 	usernameLower := string(oldUsername.ToLower())
 	newUsernameLower := string(newUsername.ToLower())
 
-	fileTypes := []string{".jpg", ".gif", ".png"}
+	fileTypes := []string{"", ".jpg", ".gif", ".png"}
 
 	for _, fileType := range fileTypes {
 		filePath := "rotur/avatars/" + usernameLower + fileType
