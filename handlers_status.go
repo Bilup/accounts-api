@@ -128,6 +128,14 @@ func (c *Conn) sendError(message string) {
 	c.sendMsg(map[string]any{"cmd": "error", "message": message})
 }
 
+func (c *Conn) requireStatusUpdatePermission() bool {
+	if c.canUpdateStatus {
+		return true
+	}
+	c.sendError("Token lacks permission: " + string(PermManageProfile))
+	return false
+}
+
 func (c *Conn) handleAuth(msg map[string]json.RawMessage) {
 	if c.userId != "" {
 		c.sendError("already authenticated")
@@ -139,9 +147,17 @@ func (c *Conn) handleAuth(msg map[string]json.RawMessage) {
 		return
 	}
 	user := authenticateWithKey(key)
-	if user == nil {
-		c.sendError("invalid key")
-		return
+	if user != nil {
+		c.canUpdateStatus = true
+	} else {
+		var subToken *SubToken
+		var err error
+		user, subToken, err = authenticateWithSubTokenFast(key)
+		if err != nil || user == nil || subToken == nil {
+			c.sendError("invalid key")
+			return
+		}
+		c.canUpdateStatus = subToken.hasPermission(PermManageProfile)
 	}
 	c.userId = user.GetId()
 	c.username = user.GetUsername()
@@ -315,6 +331,10 @@ func (c *Conn) handleRooms() {
 }
 
 func (c *Conn) handleSetStatus(msg map[string]json.RawMessage) {
+	if !c.requireStatusUpdatePermission() {
+		return
+	}
+
 	var status string
 	var statusSet bool
 	if b, ok := msg["status"]; ok {
@@ -453,6 +473,10 @@ func isIdenticalActivity(a, b Activity) bool {
 }
 
 func (c *Conn) handleAddActivity(msg map[string]json.RawMessage) {
+	if !c.requireStatusUpdatePermission() {
+		return
+	}
+
 	var act Activity
 	raw, ok := msg["id"]
 	if !ok {
@@ -518,6 +542,10 @@ func (c *Conn) handleAddActivity(msg map[string]json.RawMessage) {
 }
 
 func (c *Conn) handleRemoveActivity(msg map[string]json.RawMessage) {
+	if !c.requireStatusUpdatePermission() {
+		return
+	}
+
 	var id string
 	if err := json.Unmarshal(msg["id"], &id); err != nil || id == "" {
 		c.sendError("id required")

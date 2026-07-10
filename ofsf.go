@@ -272,11 +272,7 @@ func getFileByPath(c *gin.Context) {
 		return
 	}
 
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-
-	path = strings.ToLower(path)
+	path = strings.ToLower(strings.TrimPrefix(path, "/"))
 
 	index, err := fs.loadPathIndex(username)
 	if err != nil {
@@ -367,8 +363,8 @@ func (fs *FileSystem) ensureFoldersUnsafe(username Username, dir string) error {
 	index, _ := fs.loadPathIndexUnsafe(username)
 
 	for i := 1; i <= len(parts); i++ {
-		subPath := strings.ToLower("/" + strings.Join(parts[:i], "/"))
-		if _, exists := index[subPath]; exists {
+		folderPath := formatOFSPath(username, strings.Join(parts[:i], "/"))
+		if _, exists := index[strings.ToLower(folderPath)+".folder"]; exists {
 			continue
 		}
 
@@ -398,7 +394,7 @@ func (fs *FileSystem) ensureFoldersUnsafe(username Username, dir string) error {
 			UUID:    uuid,
 			Dta:     entry,
 		}); err != nil {
-			return fmt.Errorf("failed to create folder %q: %w", subPath, err)
+			return fmt.Errorf("failed to create folder %q: %w", folderPath, err)
 		}
 
 		index, _ = fs.loadPathIndexUnsafe(username)
@@ -481,6 +477,18 @@ func (fs *FileSystem) WriteUserFileUnsafe(username Username, fullPath string, co
 		}
 	}
 	return nil
+}
+
+func (fs *FileSystem) WriteUserFile(username Username, fullPath string, content string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.WriteUserFileUnsafe(username, fullPath, content)
+}
+
+func (fs *FileSystem) ReadUserFile(username Username, fullPath string) string {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.ReadUserFileUnsafe(username, fullPath)
 }
 
 func (fs *FileSystem) ReadUserFileUnsafe(username Username, fullPath string) string {
@@ -617,9 +625,81 @@ func (fs *FileSystem) handleAddUnsafe(username Username, change UpdateChange) er
 
 	// Load and update path index (unsafe version - no locking)
 	idx, _ := fs.loadPathIndexUnsafe(username)
-	idx[entryToPath(dta, username)] = change.UUID
-	fs.savePathIndexUnsafe(username, idx)
+	entryPath := entryToPath(dta, username)
+	replacedUUID := ""
+	if oldUUID, ok := idx[entryPath]; ok && oldUUID != change.UUID && isValidFileUUID(oldUUID) {
+		replacedUUID = oldUUID
+	}
+	idx[entryPath] = change.UUID
+	if err := fs.savePathIndexUnsafe(username, idx); err != nil {
+		if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+			log.Printf("Error rolling back file %s after index update failure: %v", path, removeErr)
+		}
+		return fmt.Errorf("failed to update path index: %w", err)
+	}
+	if replacedUUID != "" {
+		if err := os.Remove(filepath.Join(userDir, replacedUUID+".json")); err != nil && !os.IsNotExist(err) {
+			log.Printf("Error removing replaced file %s for %s: %v", replacedUUID, username, err)
+		}
+	}
+	fs.attachToParentUnsafe(username, dta, change.UUID, replacedUUID, idx)
 	return nil
+}
+
+func folderChildren(entry FileEntry) ([]any, bool) {
+	if getStringOrEmpty(entry[0]) != ".folder" {
+		return nil, false
+	}
+	switch data := entry[3].(type) {
+	case []any:
+		return data, true
+	case string:
+		var arr []any
+		if json.Unmarshal([]byte(data), &arr) == nil {
+			return arr, true
+		}
+	case nil:
+		return []any{}, true
+	}
+	return nil, false
+}
+
+// attachToParentUnsafe assumes the lock is already held
+func (fs *FileSystem) attachToParentUnsafe(username Username, entry FileEntry, uuid string, replacedUUID string, idx PathIndex) {
+	parentUUID, ok := idx[entryToLocation(entry, username)+".folder"]
+	if !ok || parentUUID == uuid {
+		return
+	}
+	parent, err := fs.getFileByUUIDUnsafe(username, parentUUID)
+	if err != nil || len(parent) != fileEntrySize {
+		return
+	}
+	children, ok := folderChildren(parent)
+	if !ok {
+		return
+	}
+	changed := false
+	found := false
+	result := make([]any, 0, len(children)+1)
+	for _, child := range children {
+		s, _ := child.(string)
+		if replacedUUID != "" && s == replacedUUID {
+			changed = true
+			continue
+		}
+		if s == uuid {
+			found = true
+		}
+		result = append(result, child)
+	}
+	if !found {
+		result = append(result, uuid)
+		changed = true
+	}
+	if changed {
+		parent[3] = result
+		fs.setFileByUUIDUnsafe(username, parentUUID, parent)
+	}
 }
 
 // handleReplaceUnsafe assumes the lock is already held
@@ -677,45 +757,68 @@ func userIndexPath(username Username) string {
 }
 
 func (fs *FileSystem) RenameUserFileSystem(oldUsername Username, newUsername Username) {
-	index, err := fs.loadPathIndex(oldUsername)
-	if err != nil {
-		ofsfErrorf("Failed to load path index: %v", err)
-		return
-	}
+	fs.migrateOrLog(oldUsername)
 
-	oldLocationPrefix := strings.ToLower("origin/(c) users/" + string(oldUsername))
-	newLocationPrefix := strings.ToLower("origin/(c) users/" + string(newUsername))
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
-	for path, uuid := range index {
-		cut, ok := strings.CutPrefix(strings.ToLower(path), oldLocationPrefix)
-		if !ok {
-			continue
-		}
-		newPath := newLocationPrefix + cut
-		index[newPath] = uuid
-		fs.handleReplaceUnsafe(oldUsername, UpdateChange{
-			Command: "UUIDr",
-			UUID:    uuid,
-			Dta:     newPath,
-			Idx:     3,
-		})
-		delete(index, path)
-	}
-
-	fs.savePathIndexUnsafe(oldUsername, index)
 
 	oldUserDir := filepath.Join(fileDir, string(oldUsername))
 	newUserDir := filepath.Join(fileDir, string(newUsername))
-	if err := os.Rename(oldUserDir, newUserDir); err != nil {
-		ofsfErrorf("Failed to rename user directory: %v", err)
+	oldIndex, err := fs.loadPathIndexUnsafe(oldUsername)
+	if err != nil {
+		ofsfErrorf("Failed to load path index for %s: %v", oldUsername, err)
+		return
 	}
+	preferred := make(PathIndex, len(oldIndex))
+	for _, uuid := range oldIndex {
+		entry, err := fs.getFileByUUIDUnsafe(oldUsername, uuid)
+		if err != nil || len(entry) != fileEntrySize {
+			continue
+		}
+		preferred[entryToPath(entry, newUsername)] = uuid
+	}
+	if err := os.Rename(oldUserDir, newUserDir); err != nil {
+		if !os.IsNotExist(err) {
+			ofsfErrorf("Failed to rename user directory: %v", err)
+		}
+		return
+	}
+
+	index, err := fs.rebuildPathIndexWithPreferredUnsafe(newUsername, preferred)
+	if err != nil {
+		ofsfErrorf("Failed to rebuild path index for %s: %v", newUsername, err)
+		return
+	}
+
+	rootKey := strings.ToLower("origin/(c) users/" + string(oldUsername) + ".folder")
+	rootUUID, ok := index[rootKey]
+	if !ok {
+		return
+	}
+	root, err := fs.getFileByUUIDUnsafe(newUsername, rootUUID)
+	if err != nil || len(root) != fileEntrySize {
+		return
+	}
+	root[1] = string(newUsername)
+	if err := fs.setFileByUUIDUnsafe(newUsername, rootUUID, root); err != nil {
+		ofsfErrorf("Failed to update root folder name for %s: %v", newUsername, err)
+		return
+	}
+	delete(index, rootKey)
+	index[strings.ToLower("origin/(c) users/"+string(newUsername)+".folder")] = rootUUID
+	fs.savePathIndexUnsafe(newUsername, index)
 }
 
 type PathIndex map[string]string
 
 // rebuildPathIndexUnsafe assumes the lock is already held
 func (fs *FileSystem) rebuildPathIndexUnsafe(username Username) (PathIndex, error) {
+	return fs.rebuildPathIndexWithPreferredUnsafe(username, nil)
+}
+
+// rebuildPathIndexWithPreferredUnsafe assumes the lock is already held. When
+// duplicate files resolve to one path, preferred records the authoritative UUID.
+func (fs *FileSystem) rebuildPathIndexWithPreferredUnsafe(username Username, preferred PathIndex) (PathIndex, error) {
 	userDir := filepath.Join(fileDir, string(username))
 
 	idx := make(PathIndex)
@@ -750,7 +853,11 @@ func (fs *FileSystem) rebuildPathIndexUnsafe(username Username) (PathIndex, erro
 		path := entryToPath(fileEntry, username)
 		uuid := strings.TrimSuffix(entry.Name(), ".json")
 
-		idx[path] = uuid
+		current, exists := idx[path]
+		preferredUUID, hasPreferred := preferred[path]
+		if !exists || (hasPreferred && uuid == preferredUUID && current != preferredUUID) {
+			idx[path] = uuid
+		}
 	}
 
 	if err := fs.savePathIndexUnsafe(username, idx); err != nil {
@@ -962,28 +1069,58 @@ func (fs *FileSystem) migrateFromLegacy(username Username) error {
 
 	pathIndex := PathIndex{}
 
+	remap := map[string]string{}
+	for i := 0; i+fileEntrySize <= len(filesList); i += fileEntrySize {
+		if uuid, ok := filesList[i+13].(string); ok && uuid != "" && !isValidFileUUID(uuid) {
+			if _, exists := remap[uuid]; !exists {
+				remap[uuid] = generateToken()
+			}
+		}
+	}
+
 	index := 0
 	for i := 0; i+fileEntrySize <= len(filesList); i += fileEntrySize {
 		entry := filesList[i : i+fileEntrySize]
-		if uuid, ok := entry[13].(string); ok {
-			metadata := FileMetadata{
-				Entry: entry,
-				Index: index,
-			}
-			internalPath := entryToPath(entry, username)
-			pathIndex[internalPath] = uuid
-			entryData, err := json.Marshal(metadata)
-			if err != nil {
-				log.Printf("Error marshaling entry data: %v", err)
-				continue
-			}
-			filePath := filepath.Join(userDir, uuid+".json")
-			if err := os.WriteFile(filePath, entryData, 0644); err != nil {
-				log.Printf("Error writing file %s: %v", filePath, err)
-				continue
-			}
-			index++
+		uuid, ok := entry[13].(string)
+		if !ok {
+			continue
 		}
+		if newUUID, exists := remap[uuid]; exists {
+			uuid = newUUID
+			entry[13] = newUUID
+		}
+		if !isValidFileUUID(uuid) {
+			continue
+		}
+		if len(remap) > 0 {
+			if children, hasChildren := folderChildren(entry); hasChildren {
+				for j, child := range children {
+					if s, isStr := child.(string); isStr {
+						if newUUID, exists := remap[s]; exists {
+							children[j] = newUUID
+						}
+					}
+				}
+				entry[3] = children
+			}
+		}
+		metadata := FileMetadata{
+			Entry: entry,
+			Index: index,
+		}
+		internalPath := entryToPath(entry, username)
+		pathIndex[internalPath] = uuid
+		entryData, err := json.Marshal(metadata)
+		if err != nil {
+			log.Printf("Error marshaling entry data: %v", err)
+			continue
+		}
+		filePath := filepath.Join(userDir, uuid+".json")
+		if err := os.WriteFile(filePath, entryData, 0644); err != nil {
+			log.Printf("Error writing file %s: %v", filePath, err)
+			continue
+		}
+		index++
 	}
 
 	filePath := filepath.Join(userDir, ".index.json")

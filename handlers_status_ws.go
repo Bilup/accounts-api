@@ -79,6 +79,7 @@ type Conn struct {
 	send            chan []byte
 	userId          UserId
 	username        Username
+	canUpdateStatus bool
 	rooms           map[string]struct{}
 	presence        Presence
 	lastPresenceSet time.Time
