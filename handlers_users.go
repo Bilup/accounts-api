@@ -89,9 +89,7 @@ func resolveUserByName(c *gin.Context, username string) (User, bool) {
 		c.JSON(404, gin.H{"error": "user not found"})
 		return nil, false
 	}
-	usersMutex.RLock()
 	user := getUserById(userId)
-	usersMutex.RUnlock()
 	if len(user) == 0 {
 		c.JSON(404, gin.H{"error": "user not found"})
 		return nil, false
@@ -172,15 +170,12 @@ func getIdxOfAccountBy(key string, value string) int {
 
 // helper function to update user keys
 func setAccountKey(username Username, key string, value any) error {
-
-	i := getIdxOfAccountBy("username", string(username))
-
-	if i != -1 {
-
-		users[i].Set(key, value)
-		return nil
+	user, err := getAccountByUsername(username)
+	if err != nil {
+		return fmt.Errorf("user not found: %s", username)
 	}
-	return fmt.Errorf("user not found: %s", username)
+	user.Set(key, value)
+	return nil
 }
 
 func getUserBy(c *gin.Context) {
@@ -211,11 +206,11 @@ func getUserBy(c *gin.Context) {
 		return
 	}
 
-	copy := copyUser(foundUsers[0])
-	delete(copy, "password")
-	delete(copy, "sys.salt")
+	userCopy := copyUser(foundUsers[0])
+	delete(userCopy, "password")
+	delete(userCopy, "sys.salt")
 
-	c.JSON(200, userToNet(copy))
+	c.JSON(200, userToNet(userCopy))
 }
 
 func getUser(c *gin.Context) {
@@ -226,19 +221,9 @@ func getUser(c *gin.Context) {
 	var subToken *SubToken
 
 	if authKey != "" {
-		foundUsers, _ := getAccountsBy("key", authKey, 1)
-		if foundUsers != nil {
-			foundUser = foundUsers[0]
-			if foundUser.GetKey() != authKey {
-				c.JSON(403, gin.H{"error": "Invalid authentication credentials"})
-				return
-			}
-		} else {
-			subUser, st, err := authenticateWithSubTokenFast(authKey)
-			if err == nil && subUser != nil {
-				foundUser = *subUser
-				subToken = st
-			}
+		if user, st := authenticateAnyKey(authKey); user != nil {
+			foundUser = *user
+			subToken = st
 		}
 	} else {
 		if bodyUser := tryBodyLogin(c); bodyUser != nil {
@@ -420,16 +405,8 @@ func userToProfileOnly(user User, subTokenValue string) map[string]any {
 	if user.Get("sys.banner") != nil || user.Get("banner") != nil {
 		profileData["banner"] = bannerURL(string(username))
 	}
-	// Resolve group tag
-	if id := user.GetString("sys.group"); id != "" {
-		groupsDataMutex.RLock()
-		for tag, data := range groupsData {
-			if string(data.Group.Id) == id {
-				profileData["group_tag"] = tag
-				break
-			}
-		}
-		groupsDataMutex.RUnlock()
+	if tag := groupTagForUser(user); tag != "" {
+		profileData["group_tag"] = tag
 	}
 	return profileData
 }
@@ -696,7 +673,7 @@ func updateUsername(oldUsername, newUsername Username) {
 		return
 	}
 
-	fs.RenameUserFileSystem(usernameLower, newUsernameLower)
+	fs.RenameUserFileSystem(string(usernameLower), string(newUsernameLower))
 	renameUserAvatar(oldUsername, newUsername)
 }
 
@@ -711,12 +688,7 @@ func updateUser(c *gin.Context) {
 	}
 	authKey := req.Auth
 	if authKey == "" {
-		authHeader := c.GetHeader("Authorization")
-		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-			authKey = authHeader[7:]
-		} else if authHeader != "" {
-			authKey = authHeader
-		}
+		authKey = stripBearer(c.GetHeader("Authorization"))
 	}
 	key := req.Key
 	if !requireField(c, key, "Key is required") {
@@ -734,26 +706,14 @@ func updateUser(c *gin.Context) {
 		return
 	}
 
-	user := authenticateWithKey(authKey)
-	tokenType := "main"
-	var subToken *SubToken
-
+	user, subToken := authenticateAnyKey(authKey)
 	if user == nil {
-		subUser, st, err := authenticateWithSubTokenFast(authKey)
-		if err != nil || subUser == nil {
-			c.JSON(403, gin.H{"error": "Invalid authentication key"})
-			return
-		}
-		user = subUser
-		tokenType = "sub"
-		subToken = st
+		c.JSON(403, gin.H{"error": "Invalid authentication key"})
+		return
 	}
-
-	if tokenType == "sub" {
-		if !subToken.hasPermission(PermManageProfile) {
-			c.JSON(403, gin.H{"error": "Token lacks permission: " + string(PermManageProfile)})
-			return
-		}
+	if subToken != nil && !subToken.hasPermission(PermManageProfile) {
+		c.JSON(403, gin.H{"error": "Token lacks permission: " + string(PermManageProfile)})
+		return
 	}
 
 	username := user.GetUsername()
@@ -806,7 +766,7 @@ func updateUser(c *gin.Context) {
 			serverError(c, err)
 			return
 		}
-		broadcastUserUpdate(user.GetUsername(), "pfp", avatarURL(user.GetUsername()))
+		go broadcastUserUpdate(user.GetUsername(), "pfp", avatarURL(user.GetUsername()))
 		go OnUserUpdate(user.GetId(), "pfp", avatarURL(user.GetUsername()))
 		go saveUsers()
 		c.JSON(200, gin.H{"message": "Profile picture uploaded successfully"})
@@ -958,9 +918,8 @@ func updateUserAdmin(c *gin.Context) {
 				return
 			}
 
-			userIndex := getIdxOfAccountBy("username", username)
-
-			if userIndex == -1 {
+			user, err := getAccountByUsername(username)
+			if err != nil {
 				c.JSON(404, gin.H{"error": "User not found"})
 				return
 			}
@@ -972,9 +931,6 @@ func updateUserAdmin(c *gin.Context) {
 				}
 			}
 
-			usersMutex.RLock()
-			user := users[userIndex]
-			usersMutex.RUnlock()
 			switch key {
 			case "username":
 				username := Username(getStringOrEmpty(value))
@@ -1008,9 +964,8 @@ func updateUserAdmin(c *gin.Context) {
 				return
 			}
 
-			userIndex := getIdxOfAccountBy("username", username)
-
-			if userIndex == -1 {
+			user, err := getAccountByUsername(username)
+			if err != nil {
 				c.JSON(404, gin.H{"error": "User not found"})
 				return
 			}
@@ -1025,11 +980,11 @@ func updateUserAdmin(c *gin.Context) {
 				return
 			}
 
-			users[userIndex].DelKey(key)
+			user.DelKey(key)
 
 			go saveUsers()
 
-			go hub.broadcastToUserConns(users[userIndex].GetId(), "key_delete", map[string]any{
+			go hub.broadcastToUserConns(user.GetId(), "key_delete", map[string]any{
 				"key": key,
 			})
 			c.JSON(200, gin.H{
@@ -1067,18 +1022,14 @@ func deleteUserKey(c *gin.Context) {
 		return
 	}
 
-	user := authenticateWithKey(authKey)
+	user, subToken := authenticateAnyKey(authKey)
 	if user == nil {
-		subUser, subToken, err := authenticateWithSubTokenFast(authKey)
-		if err != nil || subUser == nil {
-			c.JSON(403, gin.H{"error": "Invalid authentication key"})
-			return
-		}
-		user = subUser
-		if !subToken.hasPermission(PermDeleteAccount) {
-			c.JSON(403, gin.H{"error": "Token lacks permission: " + string(PermDeleteAccount)})
-			return
-		}
+		c.JSON(403, gin.H{"error": "Invalid authentication key"})
+		return
+	}
+	if subToken != nil && !subToken.hasPermission(PermDeleteAccount) {
+		c.JSON(403, gin.H{"error": "Token lacks permission: " + string(PermDeleteAccount)})
+		return
 	}
 
 	username := user.GetUsername()
@@ -1372,13 +1323,22 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 
 	if ban {
 		usersMutex.Lock()
+		oldUser := users[idx]
+		oldId := oldUser.GetId()
+		oldKey := oldUser.GetKey()
 		// set as banned
-		users[idx] = User{
+		banned := User{
 			"username":   username,
-			"email":      users[idx].GetEmail(), // so that the same email cant be used by a banned user
+			"email":      oldUser.GetEmail(), // so that the same email cant be used by a banned user
 			"private":    true,
 			"sys.banned": true,
+			"sys.id":     string(oldId),
 		}
+		users[idx] = banned
+		idToUserMutex.Lock()
+		idToUser[oldId] = banned
+		delete(keyToUserIdx, oldKey)
+		idToUserMutex.Unlock()
 		usersMutex.Unlock()
 	} else {
 		deleteAccountAtIndexFast(idx)
@@ -1458,7 +1418,7 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 		}
 
 		// remove file system
-		if err := fs.DeleteUserFileSystem(username); err != nil {
+		if err := fs.DeleteUserFileSystem(string(username)); err != nil {
 			log.Printf("Error deleting user file system: %v", err)
 		}
 

@@ -339,8 +339,8 @@ func getUserByIdx(idx int) (*User, error) {
 	if idx < 0 || len(users) <= idx {
 		return nil, fmt.Errorf("index out of bounds")
 	}
-	user := &users[idx]
-	return user, nil
+	user := users[idx]
+	return &user, nil
 }
 
 func rateLimit(limitType string) gin.HandlerFunc {
@@ -369,18 +369,10 @@ func rateLimit(limitType string) gin.HandlerFunc {
 }
 
 func extractAuthKey(c *gin.Context) string {
-	authKey := c.Query("auth")
-	if authKey != "" {
+	if authKey := c.Query("auth"); authKey != "" {
 		return authKey
 	}
-	authHeader := c.GetHeader("Authorization")
-	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-		return authHeader[len("bearer "):]
-	}
-	if authHeader != "" {
-		return authHeader
-	}
-	return ""
+	return stripBearer(c.GetHeader("Authorization"))
 }
 
 func isRequestAuthenticated(c *gin.Context) bool {
@@ -395,6 +387,15 @@ func isRequestAuthenticated(c *gin.Context) bool {
 	_, ok := subTokenIndex[authKey]
 	subTokenIndexMutex.RUnlock()
 	return ok
+}
+
+// stripBearer returns the token from an Authorization header, accepting both
+// "Bearer <token>" and a bare token.
+func stripBearer(authHeader string) string {
+	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+		return authHeader[len("bearer "):]
+	}
+	return authHeader
 }
 
 func tryBodyLogin(c *gin.Context) *User {
@@ -418,15 +419,22 @@ func tryBodyLogin(c *gin.Context) *User {
 	return &user
 }
 
+// authenticateAnyKey resolves a main account key or a sub-token to a user.
+// The returned SubToken is nil for main-key auth.
+func authenticateAnyKey(authKey string) (*User, *SubToken) {
+	if user := authenticateWithKey(authKey); user != nil {
+		return user, nil
+	}
+	if subUser, subToken, err := authenticateWithSubTokenFast(authKey); err == nil && subUser != nil {
+		return subUser, subToken
+	}
+	return nil, nil
+}
+
 func resolveOptionalUser(c *gin.Context) *User {
 	if key := extractAuthKey(c); key != "" {
-		if u := authenticateWithKey(key); u != nil {
-			return u
-		}
-		if subUser, _, err := authenticateWithSubTokenFast(key); err == nil && subUser != nil {
-			return subUser
-		}
-		return nil
+		user, _ := authenticateAnyKey(key)
+		return user
 	}
 	return tryBodyLogin(c)
 }
@@ -481,39 +489,26 @@ func requiresAuth(c *gin.Context) {
 		return
 	}
 
-	user := authenticateWithKey(authKey)
-	if user != nil {
-		if user.IsBanned() {
-			c.JSON(403, gin.H{"error": "User is banned"})
-			c.Abort()
-			return
-		}
-		user.GetSubscription()
-		c.Set("user", user)
-		c.Set("token_type", "main")
-		if accountGateBlocks(c, user) {
-			return
-		}
-		c.Next()
-		return
-	}
-
-	subUser, subToken, err := authenticateWithSubTokenFast(authKey)
-	if err != nil || subUser == nil {
+	user, subToken := authenticateAnyKey(authKey)
+	if user == nil {
 		c.JSON(403, gin.H{"error": "Invalid authentication key"})
 		c.Abort()
 		return
 	}
-	if subUser.IsBanned() {
+	if user.IsBanned() {
 		c.JSON(403, gin.H{"error": "User is banned"})
 		c.Abort()
 		return
 	}
-	subUser.GetSubscription()
-	c.Set("user", subUser)
-	c.Set("token_type", "sub")
-	c.Set("sub_token", subToken)
-	if accountGateBlocks(c, subUser) {
+	user.GetSubscription()
+	c.Set("user", user)
+	if subToken != nil {
+		c.Set("token_type", "sub")
+		c.Set("sub_token", subToken)
+	} else {
+		c.Set("token_type", "main")
+	}
+	if accountGateBlocks(c, user) {
 		return
 	}
 	c.Next()
@@ -640,18 +635,7 @@ func JSONStringify(v any) string {
 
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
-	return !os.IsNotExist(err) && info.Mode().IsRegular()
-}
-
-func copyAndReplace(src, dst, old, new string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-
-	updated := strings.ReplaceAll(string(data), old, new)
-
-	return os.WriteFile(dst, []byte(updated), 0644)
+	return err == nil && info.Mode().IsRegular()
 }
 
 func sendWebhook(url string, data map[string]any) error {
@@ -727,6 +711,12 @@ func deleteAccountAtIndexFast(idx int) error {
 	delete(idToUser, removedUserId)
 	delete(usernameToId, removedUsername)
 	delete(keyToUserIdx, removedKey)
+	// The user swapped into idx keeps its old position in keyToUserIdx; fix it.
+	if idx < len(users) {
+		if swappedKey := users[idx].GetKey(); swappedKey != "" {
+			keyToUserIdx[swappedKey] = idx
+		}
+	}
 	idToUserMutex.Unlock()
 
 	go saveUsers()

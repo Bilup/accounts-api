@@ -134,12 +134,24 @@ func getGroupMembers(groupTag string) []GroupMember {
 }
 
 func updateGroupMembers(groupTag string, members []GroupMember) {
-	groupsDataMutex.Lock()
-	defer groupsDataMutex.Unlock()
+	mutateGroupData(groupTag, func(data *GroupData) {
+		data.Members = members
+	})
+}
 
-	data := groupsData[groupTag]
-	data.Members = members
+// mutateGroupData runs fn on the group's data under the write lock and
+// schedules a save. It is a no-op if the group does not exist.
+func mutateGroupData(groupTag string, fn func(*GroupData)) bool {
+	groupsDataMutex.Lock()
+	data, ok := groupsData[groupTag]
+	if !ok {
+		groupsDataMutex.Unlock()
+		return false
+	}
+	fn(data)
+	groupsDataMutex.Unlock()
 	go saveGroupData(groupTag)
+	return true
 }
 
 func getGroupRoles(groupTag string) []GroupRole {
@@ -171,12 +183,9 @@ func groupJoinRoleIds(roles []GroupRole) []string {
 }
 
 func updateGroupRoles(groupTag string, roles []GroupRole) {
-	groupsDataMutex.Lock()
-	defer groupsDataMutex.Unlock()
-
-	data := groupsData[groupTag]
-	data.Roles = roles
-	go saveGroupData(groupTag)
+	mutateGroupData(groupTag, func(data *GroupData) {
+		data.Roles = roles
+	})
 }
 
 func getGroupAnnouncements(groupTag string) []GroupAnnouncement {
@@ -188,12 +197,9 @@ func getGroupAnnouncements(groupTag string) []GroupAnnouncement {
 }
 
 func addGroupAnnouncement(groupTag string, announcement GroupAnnouncement) {
-	groupsDataMutex.Lock()
-	defer groupsDataMutex.Unlock()
-
-	data := groupsData[groupTag]
-	data.Announcements = append(data.Announcements, announcement)
-	go saveGroupData(groupTag)
+	mutateGroupData(groupTag, func(data *GroupData) {
+		data.Announcements = append(data.Announcements, announcement)
+	})
 }
 
 func getGroupEvents(groupTag string) []GroupEvent {
@@ -213,15 +219,12 @@ func getGroupEvents(groupTag string) []GroupEvent {
 }
 
 func addGroupEvent(groupTag string, event GroupEvent) {
-	groupsDataMutex.Lock()
-	defer groupsDataMutex.Unlock()
-
-	data := groupsData[groupTag]
-	if data.Events == nil {
-		data.Events = make(map[string]GroupEvent)
-	}
-	data.Events[event.Id] = event
-	go saveGroupData(groupTag)
+	mutateGroupData(groupTag, func(data *GroupData) {
+		if data.Events == nil {
+			data.Events = make(map[string]GroupEvent)
+		}
+		data.Events[event.Id] = event
+	})
 }
 
 func getGroupTips(groupTag string) []GroupTip {
@@ -231,12 +234,10 @@ func getGroupTips(groupTag string) []GroupTip {
 func addGroupTip(groupTag string, tip GroupTip) {
 	tips := loadGroupTips(groupTag)
 	tips = append(tips, tip)
-	groupsDataMutex.Lock()
-	data := groupsData[groupTag]
-	data.Group.CreditsBalance += tip.AmountCredits
-	groupsDataMutex.Unlock()
+	mutateGroupData(groupTag, func(data *GroupData) {
+		data.Group.CreditsBalance += tip.AmountCredits
+	})
 	go saveGroupTips(groupTag, tips)
-	go saveGroupData(groupTag)
 }
 
 func getGroupRolesMap(groupTag string) map[string]GroupRole {
@@ -296,23 +297,7 @@ func (g Group) ToNet() GroupNet {
 }
 
 func (g *Group) ToPublic() GroupPublic {
-	return GroupPublic{
-		Id:             g.Id,
-		Tag:            g.Tag,
-		Name:           g.Name,
-		Description:    g.Description,
-		Readme:         g.Readme,
-		Rules:          g.Rules,
-		IconUrl:        g.IconUrl,
-		BannerUrl:      g.BannerUrl,
-		OwnerUserId:    g.OwnerUserId.User().GetUsername(),
-		Public:         g.Public,
-		JoinPolicy:     g.JoinPolicy,
-		EntryFee:       g.EntryFee,
-		CreatedAt:      g.CreatedAt,
-		CreditsBalance: g.CreditsBalance,
-		MemberCount:    0,
-	}
+	return g.ToNet()
 }
 
 type GroupMember struct {
@@ -1703,42 +1688,22 @@ type TransactionNet struct {
 	KeyId      string   `json:"key_id,omitempty"`
 }
 
-// UnmarshalJSON custom unmarshaler to handle timestamp as string or number
+// UnmarshalJSON handles the timestamp field arriving as a string or a number.
 func (r *Reply) UnmarshalJSON(data []byte) error {
-	// First try to unmarshal into a map to handle flexible timestamp type
-	var rawData map[string]any
-	if err := json.Unmarshal(data, &rawData); err != nil {
-		return err
+	type replyAlias Reply
+	var temp struct {
+		replyAlias
+		Timestamp any `json:"timestamp"`
 	}
-
-	// Handle timestamp field that can be string or number
-	var timestamp int64
-	if timestampVal, exists := rawData["timestamp"]; exists {
-		ts, err := parseJSONTimestamp(timestampVal)
-		if err != nil {
-			return err
-		}
-		timestamp = ts
-	}
-
-	// Define a temporary struct without timestamp to unmarshal the rest
-	type TempReply struct {
-		ID      string `json:"id"`
-		Content string `json:"content"`
-		User    UserId `json:"user"`
-	}
-
-	var temp TempReply
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return err
 	}
-
-	// Copy all fields to the actual Reply
-	r.ID = temp.ID
-	r.Content = temp.Content
-	r.User = temp.User
-	r.Timestamp = timestamp
-
+	ts, err := parseJSONTimestamp(temp.Timestamp)
+	if err != nil {
+		return err
+	}
+	*r = Reply(temp.replyAlias)
+	r.Timestamp = ts
 	return nil
 }
 
@@ -2122,67 +2087,21 @@ var (
 	cosmeticGiftsMutex sync.RWMutex
 )
 
-// UnmarshalJSON custom unmarshaler to handle timestamp as string or number
+// UnmarshalJSON handles the timestamp field arriving as a string or a number.
 func (p *Post) UnmarshalJSON(data []byte) error {
-	// First try to unmarshal into a map to handle flexible timestamp type
-	var rawData map[string]any
-	if err := json.Unmarshal(data, &rawData); err != nil {
-		return err
+	type postAlias Post
+	var temp struct {
+		postAlias
+		Timestamp any `json:"timestamp"`
 	}
-
-	// Handle timestamp field that can be string or number
-	var timestamp int64
-	if timestampVal, exists := rawData["timestamp"]; exists {
-		ts, err := parseJSONTimestamp(timestampVal)
-		if err != nil {
-			return err
-		}
-		timestamp = ts
-	}
-
-	// Define a temporary struct without timestamp to unmarshal the rest
-	type TempPost struct {
-		ID           string   `json:"id"`
-		Content      string   `json:"content"`
-		User         UserId   `json:"user"`
-		Attachment   *string  `json:"attachment,omitempty"`
-		Attachments  []string `json:"attachments,omitempty"`
-		ProfileOnly  bool     `json:"profile_only,omitempty"`
-		OS           *string  `json:"os,omitempty"`
-		Replies      []Reply  `json:"replies,omitempty"`
-		Likes        []UserId `json:"likes,omitempty"`
-		Pinned       bool     `json:"pinned,omitempty"`
-		IsRepost     bool     `json:"is_repost,omitempty"`
-		OriginalPost *Post    `json:"original_post,omitempty"`
-		EditedAt     int64    `json:"edited_at,omitempty"`
-		Viewers      []UserId `json:"viewers,omitempty"`
-		Poll         *Poll    `json:"poll,omitempty"`
-		PublishAt    int64    `json:"publish_at,omitempty"`
-	}
-
-	var temp TempPost
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return err
 	}
-
-	// Copy all fields to the actual Post
-	p.ID = temp.ID
-	p.Content = temp.Content
-	p.User = temp.User
-	p.Timestamp = timestamp
-	p.Attachment = temp.Attachment
-	p.Attachments = temp.Attachments
-	p.ProfileOnly = temp.ProfileOnly
-	p.OS = temp.OS
-	p.Replies = temp.Replies
-	p.Likes = temp.Likes
-	p.Pinned = temp.Pinned
-	p.IsRepost = temp.IsRepost
-	p.OriginalPost = temp.OriginalPost
-	p.EditedAt = temp.EditedAt
-	p.Viewers = temp.Viewers
-	p.Poll = temp.Poll
-	p.PublishAt = temp.PublishAt
-
+	ts, err := parseJSONTimestamp(temp.Timestamp)
+	if err != nil {
+		return err
+	}
+	*p = Post(temp.postAlias)
+	p.Timestamp = ts
 	return nil
 }

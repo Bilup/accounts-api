@@ -89,28 +89,14 @@ func createKey(c *gin.Context) {
 
 	// Handle subscription creation
 	if subscriptionFlag == "true" || subscriptionFlag == "1" {
-		now := time.Now()
-		var nextBilling time.Time
-		switch strings.ToLower(period) {
-		case "day":
-			nextBilling = now.AddDate(0, 0, frequency)
-		case "week":
-			nextBilling = now.AddDate(0, 0, 7*frequency)
-		case "month":
-			nextBilling = now.AddDate(0, frequency, 0)
-		case "year":
-			nextBilling = now.AddDate(frequency, 0, 0)
-		default:
-			period = "month"
-			nextBilling = now.AddDate(0, frequency, 0)
+		sub := &Subscription{
+			Active:    true,
+			Frequency: frequency,
+			Period:    period,
 		}
+		sub.NextBilling = computeNextBilling(sub).Unix() // store as unix seconds for consistency
 		newKey.Type = "subscription"
-		newKey.Subscription = &Subscription{
-			Active:      true,
-			Frequency:   frequency,
-			Period:      period,
-			NextBilling: nextBilling.Unix(), // store as unix seconds for consistency
-		}
+		newKey.Subscription = sub
 	}
 
 	// Add creator to key users
@@ -144,14 +130,9 @@ func getMyKeys(c *gin.Context) {
 	userKeys := make([]NetKey, 0)
 	for _, key := range keys {
 		if _, hasAccess := key.Users[userId]; hasAccess {
-			users := make(map[Username]KeyUserData)
 			if key.Creator != userId {
 				key.Data = nil
 				key.TotalIncome = 0
-			} else {
-				for k, v := range key.Users {
-					users[k.User().GetUsername()] = v
-				}
 			}
 			userKeys = append(userKeys, key.ToNet())
 		}
@@ -417,143 +398,102 @@ func buyKey(c *gin.Context) {
 	id := c.Param("id")
 	user := currentUser(c)
 
+	userId := user.GetId()
+	balance := user.GetCredits()
+
+	// Mutate the key under keysMutex, but do all credit/transaction work after
+	// releasing it: applyTransaction -> GetSubscription re-enters keysMutex.
+	var (
+		boughtKey Key
+		found     bool
+		errMsg    string
+	)
 	keysMutex.Lock()
-	defer keysMutex.Unlock()
-
 	for i := range keys {
-		if keys[i].Key == id {
-			if keys[i].Price < 0 {
-				c.JSON(400, ErrorResponse{Error: "Key is not for sale"})
-				return
-			}
-
-			userId := user.GetId()
-			if _, hasAccess := keys[i].Users[userId]; hasAccess {
-				c.JSON(400, ErrorResponse{Error: "You already have access to this key"})
-				return
-			}
-
-			var balance = user.GetCredits()
-			if balance < float64(keys[i].Price) {
-				c.JSON(400, ErrorResponse{Error: "Insufficient balance to buy this key"})
-				return
-			}
-
-			// Add user to key
+		if keys[i].Key != id {
+			continue
+		}
+		found = true
+		switch {
+		case keys[i].Price < 0:
+			errMsg = "Key is not for sale"
+		case hasKeyAccess(keys[i], userId):
+			errMsg = "You already have access to this key"
+		case balance < float64(keys[i].Price):
+			errMsg = "Insufficient balance to buy this key"
+		default:
 			userData := KeyUserData{
 				Time:  time.Now().Unix(),
 				Price: keys[i].Price,
 			}
-
 			if keys[i].Subscription != nil {
-				now := time.Now()
-
-				// Calculate next billing based on subscription period and frequency
-				frequency := keys[i].Subscription.Frequency
-				if frequency == 0 {
-					frequency = 1
-				}
-				period := keys[i].Subscription.Period
-				if period == "" {
-					period = "month"
-				}
-
-				var nextBillingTime time.Time
-				switch strings.ToLower(period) {
-				case "day":
-					nextBillingTime = now.AddDate(0, 0, frequency)
-				case "week":
-					nextBillingTime = now.AddDate(0, 0, frequency*7)
-				case "month":
-					nextBillingTime = now.AddDate(0, frequency, 0)
-				case "year":
-					nextBillingTime = now.AddDate(frequency, 0, 0)
-				default:
-					nextBillingTime = now.AddDate(0, frequency, 0) // Default to month
-				}
-
-				userData.NextBilling = nextBillingTime.UnixMilli()
+				userData.NextBilling = computeNextBilling(keys[i].Subscription).UnixMilli()
 			}
-
 			keys[i].Users[userId] = userData
-
-			// Update total income for the key
 			keys[i].TotalIncome += keys[i].Price
-
-			go saveKeys()
-
-			userIndex := -1
-			usersMutex.RLock()
-			for j, u := range users {
-				if u.GetId() == userId {
-					userIndex = j
-					break
-				}
-			}
-
-			ownerIndex := -1
-			for j, u := range users {
-				if u.GetId() == keys[i].Creator {
-					ownerIndex = j
-					break
-				}
-			}
-			usersMutex.RUnlock()
-
-			if userIndex != -1 {
-				// Flexible extraction for sys.currency
-				newBal := user.GetCredits() - float64(keys[i].Price)
-				user.applyTransaction(newBal, Transaction{
-					Note:      "key purchase",
-					User:      user.GetId(),
-					Amount:    float64(keys[i].Price),
-					Type:      "key_buy",
-					Timestamp: time.Now().UnixMilli(),
-					KeyName:   keys[i].Name,
-					KeyId:     keys[i].Key,
-				})
-
-				// Pay the creator
-				if ownerIndex != -1 && ownerIndex != userIndex {
-					owner, _ := getUserByIdx(ownerIndex)
-					var ownerCurrency float64 = owner.GetCredits()
-					// 10% tax on purchase
-					value := float64(keys[i].Price) * 0.9
-					newBal := ownerCurrency + value
-					owner.applyTransaction(newBal, Transaction{
-						Note:      "key purchase",
-						User:      user.GetId(),
-						Amount:    float64(keys[i].Price),
-						Type:      "key_sale",
-						Timestamp: time.Now().UnixMilli(),
-						KeyName:   keys[i].Name,
-						KeyId:     keys[i].Key,
-					})
-				}
-
-				if keys[i].Webhook != nil && len(*keys[i].Webhook) > 0 {
-					username := user.GetUsername()
-					_ = sendWebhook(*keys[i].Webhook, map[string]any{
-						"username":  username,    // purchaser
-						"key":       keys[i].Key, // id
-						"price":     keys[i].Price,
-						"content":   string(username) + " purchased key " + keys[i].Key + " for " + strconv.Itoa(keys[i].Price) + " credits",
-						"timestamp": time.Now().Unix(),
-					})
-				}
-
-				go saveUsers()
-			} else {
-				c.JSON(500, ErrorResponse{Error: "User not found in users list"})
-				return
-			}
-
-			c.JSON(200, gin.H{"message": "Key purchased successfully"})
-			return
+			boughtKey = keys[i]
 		}
+		break
+	}
+	keysMutex.Unlock()
+
+	if !found {
+		c.JSON(404, ErrorResponse{Error: "Key not found"})
+		return
+	}
+	if errMsg != "" {
+		c.JSON(400, ErrorResponse{Error: errMsg})
+		return
 	}
 
-	c.JSON(404, ErrorResponse{Error: "Key not found"})
+	go saveKeys()
+
+	now := time.Now().UnixMilli()
+	price := float64(boughtKey.Price)
+
+	user.applyTransaction(user.GetCredits()-price, Transaction{
+		Note:      "key purchase",
+		User:      userId,
+		Amount:    price,
+		Type:      "key_buy",
+		Timestamp: now,
+		KeyName:   boughtKey.Name,
+		KeyId:     boughtKey.Key,
+	})
+
+	if owner, err := getAccountByUserId(boughtKey.Creator); err == nil && owner.GetId() != userId {
+		// 10% tax on purchase
+		value := price * 0.9
+		owner.applyTransaction(owner.GetCredits()+value, Transaction{
+			Note:      "key purchase",
+			User:      userId,
+			Amount:    price,
+			Type:      "key_sale",
+			Timestamp: now,
+			KeyName:   boughtKey.Name,
+			KeyId:     boughtKey.Key,
+		})
+	}
+
+	if boughtKey.Webhook != nil && len(*boughtKey.Webhook) > 0 {
+		username := user.GetUsername()
+		_ = sendWebhook(*boughtKey.Webhook, map[string]any{
+			"username":  username,      // purchaser
+			"key":       boughtKey.Key, // id
+			"price":     boughtKey.Price,
+			"content":   string(username) + " purchased key " + boughtKey.Key + " for " + strconv.Itoa(boughtKey.Price) + " credits",
+			"timestamp": time.Now().Unix(),
+		})
+	}
+
+	go saveUsers()
+
+	c.JSON(200, gin.H{"message": "Key purchased successfully"})
+}
+
+func hasKeyAccess(k Key, userId UserId) bool {
+	_, ok := k.Users[userId]
+	return ok
 }
 
 func cancelKey(c *gin.Context) {
@@ -843,9 +783,7 @@ func checkSubscriptions() {
 
 		log.Printf("Subscription check completed: %d keys with subscriptions checked, %d charges processed", subscriptionsProcessed, chargesProcessed)
 
-		if len(keys) > 0 {
-			saveKeys()
-		}
+		saveKeys()
 	}
 }
 

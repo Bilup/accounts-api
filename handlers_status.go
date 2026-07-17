@@ -146,19 +146,12 @@ func (c *Conn) handleAuth(msg map[string]json.RawMessage) {
 		c.sendError("key required")
 		return
 	}
-	user := authenticateWithKey(key)
-	if user != nil {
-		c.canUpdateStatus = true
-	} else {
-		var subToken *SubToken
-		var err error
-		user, subToken, err = authenticateWithSubTokenFast(key)
-		if err != nil || user == nil || subToken == nil {
-			c.sendError("invalid key")
-			return
-		}
-		c.canUpdateStatus = subToken.hasPermission(PermManageProfile)
+	user, subToken := authenticateAnyKey(key)
+	if user == nil {
+		c.sendError("invalid key")
+		return
 	}
+	c.canUpdateStatus = subToken == nil || subToken.hasPermission(PermManageProfile)
 	c.userId = user.GetId()
 	c.username = user.GetUsername()
 	hub.register(c)

@@ -173,10 +173,7 @@ func clawWSHandler(c *gin.Context) {
 
 	conn := &clawRealtimeConn{send: make(chan []byte, 256)}
 	if key := extractAuthKey(c); key != "" {
-		if user := authenticateWithKey(key); user != nil {
-			conn.userId = user.GetId()
-			conn.username = user.GetUsername()
-		} else if user, _, err := authenticateWithSubTokenFast(key); err == nil && user != nil {
+		if user, _ := authenticateAnyKey(key); user != nil {
 			conn.userId = user.GetId()
 			conn.username = user.GetUsername()
 		}
@@ -251,11 +248,7 @@ func (c *clawRealtimeConn) handleRealtimeAuth(msg map[string]json.RawMessage) {
 		c.sendJSON(map[string]any{"cmd": "auth", "success": false, "error": "key required"})
 		return
 	}
-	if user := authenticateWithKey(key); user != nil {
-		clawHub.authenticateConn(c, user)
-		return
-	}
-	if user, _, err := authenticateWithSubTokenFast(key); err == nil && user != nil {
+	if user, _ := authenticateAnyKey(key); user != nil {
 		clawHub.authenticateConn(c, user)
 		return
 	}

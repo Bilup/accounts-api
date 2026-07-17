@@ -150,7 +150,7 @@ func notifyEndpointsPath(username Username) string {
 
 func loadNotifyEndpoints(username Username) NotificationEndpointsFile {
 	path := notifyEndpointsPath(username)
-	dataStr := fs.ReadUserFileUnsafe(username, path)
+	dataStr := fs.ReadUserFile(string(username), path)
 	if dataStr == "" {
 		return NotificationEndpointsFile{Endpoints: []NotificationEndpoint{}}
 	}
@@ -177,7 +177,7 @@ func saveNotifyEndpoints(username Username, file NotificationEndpointsFile) erro
 		return err
 	}
 	path := notifyEndpointsPath(username)
-	if err := fs.WriteUserFileUnsafe(username, path, string(data)); err != nil {
+	if err := fs.WriteUserFile(string(username), path, string(data)); err != nil {
 		return fmt.Errorf("failed to save endpoints: %w", err)
 	}
 	return nil
@@ -299,9 +299,6 @@ func registerForNotifications(c *gin.Context) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
 	file := loadNotifyEndpoints(username)
 	found := false
 	for i, ep := range file.Endpoints {
@@ -357,9 +354,6 @@ func checkNotifyRegistration(c *gin.Context) {
 	mu.RLock()
 	defer mu.RUnlock()
 
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-
 	file := loadNotifyEndpoints(username)
 	for _, ep := range file.Endpoints {
 		if ep.DeviceID == deviceID && ep.Source == source {
@@ -385,9 +379,6 @@ func getNotifyEndpoints(c *gin.Context) {
 	mu.RLock()
 	defer mu.RUnlock()
 
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-
 	file := loadNotifyEndpoints(username)
 	c.JSON(200, gin.H{
 		"endpoints": file.Endpoints,
@@ -406,9 +397,6 @@ func deleteNotifyDevice(c *gin.Context) {
 	mu := getNotifyMutex(username)
 	mu.Lock()
 	defer mu.Unlock()
-
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
 
 	file := loadNotifyEndpoints(username)
 	newEndpoints := make([]NotificationEndpoint, 0, len(file.Endpoints))
@@ -550,9 +538,7 @@ func sendPushNotificationToUser(target User, sender User, req NotificationReques
 	username := target.GetUsername()
 	mu := getNotifyMutex(username)
 	mu.RLock()
-	fs.mu.RLock()
 	endpointsFile := loadNotifyEndpoints(username)
-	fs.mu.RUnlock()
 	mu.RUnlock()
 
 	var targetEndpoints []NotificationEndpoint
@@ -742,9 +728,6 @@ func pruneNotifyDevice(username Username, deviceID string) {
 	mu := getNotifyMutex(username)
 	mu.Lock()
 	defer mu.Unlock()
-
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
 
 	file := loadNotifyEndpoints(username)
 	newEndpoints := make([]NotificationEndpoint, 0, len(file.Endpoints))

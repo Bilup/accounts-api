@@ -213,60 +213,69 @@ type TokenStore struct {
 
 var (
 	tokenStoreCache = make(map[UserId]*TokenStore)
-	tokenStoreMutex sync.RWMutex
+	// tokenStoreMutex guards tokenStoreCache and the contents of every cached
+	// TokenStore. All reads and writes of token data must go through
+	// readTokenStore / modifyTokenStore.
+	tokenStoreMutex sync.Mutex
 )
 
-func getTokenStorePath(userId UserId) string {
-	return getUserDataFile(userId, "tokens.json")
-}
-
-func loadTokenStore(userId UserId) (*TokenStore, error) {
-	key := userId
-	tokenStoreMutex.RLock()
-	if cached, ok := tokenStoreCache[key]; ok {
-		tokenStoreMutex.RUnlock()
+// loadTokenStoreLocked returns the user's cached store, loading it from disk
+// on first access. Caller must hold tokenStoreMutex.
+func loadTokenStoreLocked(userId UserId) (*TokenStore, error) {
+	if cached, ok := tokenStoreCache[userId]; ok {
 		return cached, nil
 	}
-	tokenStoreMutex.RUnlock()
-
 	store, err := LoadUserJSON[TokenStore](userId, "tokens.json")
 	if err != nil {
 		if os.IsNotExist(err) {
-			store := &TokenStore{
+			fresh := &TokenStore{
 				Tokens:    []SubToken{},
 				UpdatedAt: time.Now().UnixMilli(),
 			}
-			tokenStoreMutex.Lock()
-			tokenStoreCache[key] = store
-			tokenStoreMutex.Unlock()
-			return store, nil
+			tokenStoreCache[userId] = fresh
+			return fresh, nil
 		}
 		return nil, fmt.Errorf("failed to read token store: %w", err)
 	}
-
-	tokenStoreMutex.Lock()
-	if existing, ok := tokenStoreCache[key]; ok {
-		tokenStoreMutex.Unlock()
-		return existing, nil
-	}
-	tokenStoreCache[key] = &store
-	tokenStoreMutex.Unlock()
-
+	tokenStoreCache[userId] = &store
 	return &store, nil
 }
 
-func saveTokenStore(userId UserId, store *TokenStore) error {
-	store.UpdatedAt = time.Now().UnixMilli()
+// readTokenStore returns a snapshot copy of the user's sub-tokens.
+func readTokenStore(userId UserId) ([]SubToken, error) {
+	tokenStoreMutex.Lock()
+	defer tokenStoreMutex.Unlock()
+	store, err := loadTokenStoreLocked(userId)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SubToken, len(store.Tokens))
+	copy(out, store.Tokens)
+	return out, nil
+}
 
-	if err := SaveUserJSON(userId, "tokens.json", store); err != nil {
+// modifyTokenStore runs fn on the user's store under the lock; if fn returns
+// true the store is persisted to disk (from a snapshot, outside the lock).
+func modifyTokenStore(userId UserId, fn func(*TokenStore) bool) error {
+	tokenStoreMutex.Lock()
+	store, err := loadTokenStoreLocked(userId)
+	if err != nil {
+		tokenStoreMutex.Unlock()
 		return err
 	}
-
-	tokenStoreMutex.Lock()
-	tokenStoreCache[userId] = store
+	if !fn(store) {
+		tokenStoreMutex.Unlock()
+		return nil
+	}
+	store.UpdatedAt = time.Now().UnixMilli()
+	snapshot := TokenStore{
+		Tokens:    make([]SubToken, len(store.Tokens)),
+		UpdatedAt: store.UpdatedAt,
+	}
+	copy(snapshot.Tokens, store.Tokens)
 	tokenStoreMutex.Unlock()
 
-	return nil
+	return SaveUserJSON(userId, "tokens.json", &snapshot)
 }
 
 func generateSubTokenID() string {
@@ -358,32 +367,35 @@ type subTokenEntry struct {
 }
 
 func buildSubTokenIndex() {
-	subTokenIndexMutex.Lock()
-	defer subTokenIndexMutex.Unlock()
-
-	subTokenIndex = make(map[string]*subTokenEntry)
-
 	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-
+	userIds := make([]UserId, 0, len(users))
 	for i := range users {
-		userId := users[i].GetId()
-		store, err := loadTokenStore(userId)
+		userIds = append(userIds, users[i].GetId())
+	}
+	usersMutex.RUnlock()
+
+	idx := make(map[string]*subTokenEntry)
+	now := time.Now().UnixMilli()
+	for _, userId := range userIds {
+		tokens, err := readTokenStore(userId)
 		if err != nil {
 			continue
 		}
-
-		for _, t := range store.Tokens {
-			if !t.Revoked && (t.ExpiresAt == nil || *t.ExpiresAt > time.Now().UnixMilli()) {
-				subTokenIndex[t.Token] = &subTokenEntry{
-					UserId:  users[i].GetId(),
+		for _, t := range tokens {
+			if !t.Revoked && (t.ExpiresAt == nil || *t.ExpiresAt > now) {
+				idx[t.Token] = &subTokenEntry{
+					UserId:  userId,
 					TokenID: t.ID,
 				}
 			}
 		}
 	}
 
-	log.Printf("Built sub-token index with %d active tokens", len(subTokenIndex))
+	subTokenIndexMutex.Lock()
+	subTokenIndex = idx
+	subTokenIndexMutex.Unlock()
+
+	log.Printf("Built sub-token index with %d active tokens", len(idx))
 }
 
 func authenticateWithSubTokenFast(tokenValue string) (*User, *SubToken, error) {
@@ -402,38 +414,39 @@ func authenticateWithSubTokenFast(tokenValue string) (*User, *SubToken, error) {
 	}
 	foundUserPtr := &foundUser
 
-	store, err := loadTokenStore(entry.UserId)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load token store: %w", err)
-	}
-
-	for j := range store.Tokens {
-		t := &store.Tokens[j]
-		if t.ID == entry.TokenID && t.Token == tokenValue {
+	var matched *SubToken
+	var authErr error
+	err = modifyTokenStore(entry.UserId, func(store *TokenStore) bool {
+		for j := range store.Tokens {
+			t := &store.Tokens[j]
+			if t.ID != entry.TokenID || t.Token != tokenValue {
+				continue
+			}
 			if t.Revoked {
-				subTokenIndexMutex.Lock()
-				delete(subTokenIndex, tokenValue)
-				subTokenIndexMutex.Unlock()
-				return nil, nil, fmt.Errorf("token has been revoked")
+				authErr = fmt.Errorf("token has been revoked")
+				return false
 			}
 			if t.ExpiresAt != nil && *t.ExpiresAt < time.Now().UnixMilli() {
-				subTokenIndexMutex.Lock()
-				delete(subTokenIndex, tokenValue)
-				subTokenIndexMutex.Unlock()
-				return nil, nil, fmt.Errorf("token has expired")
+				authErr = fmt.Errorf("token has expired")
+				return false
 			}
 			now := time.Now().UnixMilli()
 			t.LastUsedAt = &now
-			go saveTokenStore(entry.UserId, store)
-			return foundUserPtr, t, nil
+			tCopy := *t
+			matched = &tCopy
+			return true
 		}
+		authErr = fmt.Errorf("sub-token not found in store")
+		return false
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load token store: %w", err)
 	}
-
-	subTokenIndexMutex.Lock()
-	delete(subTokenIndex, tokenValue)
-	subTokenIndexMutex.Unlock()
-
-	return nil, nil, fmt.Errorf("sub-token not found in store")
+	if matched == nil {
+		removeFromSubTokenIndex(tokenValue)
+		return nil, nil, authErr
+	}
+	return foundUserPtr, matched, nil
 }
 
 func addToSubTokenIndex(tokenValue string, userId UserId, tokenID string) {
@@ -464,26 +477,20 @@ func cleanExpiredSubTokens() {
 
 		now := time.Now().UnixMilli()
 		for _, userId := range userIds {
-			store, err := loadTokenStore(userId)
-			if err != nil {
-				continue
-			}
-
-			changed := false
-			for j := range store.Tokens {
-				t := &store.Tokens[j]
-				if !t.Revoked && t.ExpiresAt != nil && *t.ExpiresAt < now {
-					t.Revoked = true
-					revokedAt := now
-					t.RevokedAt = &revokedAt
-					removeFromSubTokenIndex(t.Token)
-					changed = true
+			_ = modifyTokenStore(userId, func(store *TokenStore) bool {
+				changed := false
+				for j := range store.Tokens {
+					t := &store.Tokens[j]
+					if !t.Revoked && t.ExpiresAt != nil && *t.ExpiresAt < now {
+						t.Revoked = true
+						revokedAt := now
+						t.RevokedAt = &revokedAt
+						removeFromSubTokenIndex(t.Token)
+						changed = true
+					}
 				}
-			}
-
-			if changed {
-				go saveTokenStore(userId, store)
-			}
+				return changed
+			})
 		}
 	}
 }

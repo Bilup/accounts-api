@@ -1,29 +1,55 @@
-package main
+// Package ofsf implements the Origin File System Format engine: a per-user
+// on-disk file store with a path index, used by the /files endpoints.
+package ofsf
 
 import (
-	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
-type UpdateFileRequest struct {
-	Updates []UpdateChange `json:"updates" binding:"required"`
+func getStringOrEmpty(val any) string {
+	if s, ok := val.(string); ok {
+		return s
+	}
+	return ""
 }
 
-type GetFilesRequest struct {
-	Username string   `json:"username" binding:"required"`
-	UUIDs    []string `json:"uuids" binding:"required"`
+func generateToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic("failed to generate token: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
+func jsonString(v any) string {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(data)
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+func copyAndReplace(src, dst, old, new string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, []byte(strings.ReplaceAll(string(data), old, new)), 0644)
 }
 
 type FileMetadata struct {
@@ -33,83 +59,11 @@ type FileMetadata struct {
 
 type FileEntry []any
 
-type FileEntryStruct struct {
-	Type          string   `json:"type"`
-	Name          string   `json:"name"`
-	Location      string   `json:"location"`
-	Data          string   `json:"data"`
-	DataSecondary any      `json:"data_secondary"`
-	X             int64    `json:"x"`
-	Y             int64    `json:"y"`
-	Id            any      `json:"id"`
-	Created       int64    `json:"created"`
-	Edited        int64    `json:"edited"`
-	Icon          string   `json:"icon"`
-	Size          int64    `json:"size"`
-	Permissions   []string `json:"permissions"`
-	UUID          string   `json:"uuid"`
-}
-
-type FolderEntryStruct struct {
-	Name          string   `json:"name"`
-	Location      string   `json:"location"`
-	Data          []any    `json:"data"`
-	DataSecondary any      `json:"data_secondary"`
-	X             int64    `json:"x"`
-	Y             int64    `json:"y"`
-	Id            any      `json:"id"`
-	Created       int64    `json:"created"`
-	Edited        int64    `json:"edited"`
-	Icon          string   `json:"icon"`
-	Size          int64    `json:"size"`
-	Permissions   []string `json:"permissions"`
-	UUID          string   `json:"uuid"`
-}
-
-type GetFileSizesRequest struct {
-	UUIDs []string `json:"uuids" binding:"required"`
-}
-
 type FileStat struct {
 	UUID    string    `json:"uuid"`
 	Size    int64     `json:"size,omitempty"`
 	ModTime time.Time `json:"mtime,omitempty"`
 	Ok      bool      `json:"ok"`
-}
-
-var fs *FileSystem = NewFileSystem()
-
-func updateFiles(c *gin.Context) {
-	user := currentUser(c)
-
-	bodyBytes, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read request body"})
-		return
-	}
-
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-	var req UpdateFileRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		fmt.Println("Raw body:", string(bodyBytes))
-
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	maxSize := user.GetSubscriptionBenefits().FileSystem_Size
-
-	result := fs.HandleOFSFUpdate(user.GetUsername(), req.Updates, maxSize)
-
-	statusCode := http.StatusOK
-	if result.Payload == "Max Upload Size Exceeded" {
-		statusCode = http.StatusRequestEntityTooLarge
-	} else if result.Payload != "Successfully Updated Origin Files" {
-		statusCode = http.StatusBadRequest
-	}
-
-	c.JSON(statusCode, result)
 }
 
 func ofsfErrorf(format string, a ...any) {
@@ -122,196 +76,6 @@ func ofsfOkf(format string, a ...any) {
 
 func ofsfWarnf(format string, a ...any) {
 	fmt.Printf("\033[93m[~] OFSF\033[0m | "+format+"\n", a...)
-}
-
-func sendOctetStream(c *gin.Context, data []byte) {
-	c.Header("Content-Length", fmt.Sprintf("%d", len(data)))
-	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Data(http.StatusOK, "application/octet-stream", data)
-}
-
-func getFilesByUUIDs(c *gin.Context) {
-	user := currentUser(c)
-
-	var req GetFilesRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	files, err := fs.GetFilesByUUIDs(user.GetUsername(), req.UUIDs)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"files": files})
-}
-
-func getUserFileSize(c *gin.Context) {
-	user := currentUser(c)
-
-	username := user.GetUsername()
-
-	size, err := fs.GetUserFileSize(username)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"username": username, "size": size})
-}
-
-func deleteAllUserFiles(c *gin.Context) {
-	user := currentUser(c)
-
-	username := user.GetUsername()
-
-	if err := fs.DeleteUserFileSystem(username); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "deleted", "username": username})
-}
-
-func getFilesIndex(c *gin.Context) {
-	user := currentUser(c)
-
-	username := user.GetUsername()
-	fs.migrateOrLog(username)
-	index, err := fs.GetFilesIndexWithThreshold(username, 50*1024)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	jsonData, err := json.Marshal(index)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize OFSF data"})
-		return
-	}
-
-	sendOctetStream(c, jsonData)
-}
-
-func getFilesAll(c *gin.Context) {
-	user := currentUser(c)
-
-	username := user.GetUsername()
-	fs.migrateOrLog(username)
-	index, err := fs.GetFilesIndexWithThreshold(username, 0)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	jsonData, err := json.Marshal(index)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize OFSF data"})
-		return
-	}
-
-	sendOctetStream(c, jsonData)
-}
-
-func getFileSizes(c *gin.Context) {
-	user := currentUser(c)
-	username := user.GetUsername()
-
-	var req GetFileSizesRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	stats, err := fs.GetFileStats(username, req.UUIDs)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"stats": stats})
-}
-
-func getFileByUUID(c *gin.Context) {
-	user := currentUser(c)
-
-	uuid := c.Query("uuid")
-	if uuid == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "UUID is required"})
-		return
-	}
-
-	username := user.GetUsername()
-	fs.migrateOrLog(username)
-
-	file, err := fs.GetFileByUUID(username, uuid)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	jsonData, err := json.Marshal(file)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize OFSF data"})
-		return
-	}
-
-	sendOctetStream(c, jsonData)
-}
-
-func getFileByPath(c *gin.Context) {
-	user := currentUser(c)
-	username := user.GetUsername()
-
-	path := c.Param("path")
-	if path == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Path is required"})
-		return
-	}
-
-	path = strings.ToLower(strings.TrimPrefix(path, "/"))
-
-	index, err := fs.loadPathIndex(username)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load path index"})
-		return
-	}
-
-	uuid, ok := index[path]
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
-		return
-	}
-
-	entry, err := fs.GetFileByUUID(username, uuid)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	data, err := json.Marshal(entry)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize file"})
-		return
-	}
-
-	sendOctetStream(c, data)
-}
-
-func getPathIndex(c *gin.Context) {
-	user := currentUser(c)
-	username := user.GetUsername()
-
-	index, err := fs.loadPathIndex(username)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load path index"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"index": index, "username": username})
 }
 
 const (
@@ -328,11 +92,6 @@ type UpdateChange struct {
 	Idx     any    `json:"idx"`
 }
 
-type UpdateRequest struct {
-	Payload []UpdateChange `json:"payload"`
-	Offset  string         `json:"offset"`
-}
-
 type UpdateResult struct {
 	Payload       string `json:"payload"`
 	UsedSize      int    `json:"used_size,omitempty"`
@@ -347,13 +106,13 @@ func NewFileSystem() *FileSystem {
 	return &FileSystem{}
 }
 
-func formatOFSPath(username Username, dir string) string {
+func formatOFSPath(username string, dir string) string {
 	basePath := "origin/(c) users/" + string(username) + "/"
 	formatted := strings.Trim(dir, "/")
 	return strings.TrimSuffix(basePath+formatted, "/")
 }
 
-func (fs *FileSystem) ensureFoldersUnsafe(username Username, dir string) error {
+func (fs *FileSystem) ensureFoldersUnsafe(username string, dir string) error {
 	dir = strings.TrimSuffix(strings.TrimSuffix(dir, "/"), " ")
 	if dir == "" || dir == "/" {
 		return nil
@@ -402,7 +161,7 @@ func (fs *FileSystem) ensureFoldersUnsafe(username Username, dir string) error {
 	return nil
 }
 
-func (fs *FileSystem) WriteUserFileUnsafe(username Username, fullPath string, content string) error {
+func (fs *FileSystem) WriteUserFileUnsafe(username string, fullPath string, content string) error {
 	now := time.Now().UnixMilli()
 	lowerPath := strings.ToLower(fullPath)
 	index, _ := fs.loadPathIndexUnsafe(username)
@@ -479,19 +238,19 @@ func (fs *FileSystem) WriteUserFileUnsafe(username Username, fullPath string, co
 	return nil
 }
 
-func (fs *FileSystem) WriteUserFile(username Username, fullPath string, content string) error {
+func (fs *FileSystem) WriteUserFile(username string, fullPath string, content string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	return fs.WriteUserFileUnsafe(username, fullPath, content)
 }
 
-func (fs *FileSystem) ReadUserFile(username Username, fullPath string) string {
+func (fs *FileSystem) ReadUserFile(username string, fullPath string) string {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	return fs.ReadUserFileUnsafe(username, fullPath)
 }
 
-func (fs *FileSystem) ReadUserFileUnsafe(username Username, fullPath string) string {
+func (fs *FileSystem) ReadUserFileUnsafe(username string, fullPath string) string {
 	index, _ := fs.loadPathIndexUnsafe(username)
 	fileUUID, ok := index[strings.ToLower(fullPath)]
 	if !ok {
@@ -508,11 +267,11 @@ func (fs *FileSystem) ReadUserFileUnsafe(username Username, fullPath string) str
 	return dataStr
 }
 
-func (fs *FileSystem) HandleOFSFUpdate(username Username, updates []UpdateChange, maxSize int) UpdateResult {
+func (fs *FileSystem) HandleOFSFUpdate(username string, updates []UpdateChange, maxSize int) UpdateResult {
 
 	ofsfOkf("%s processing %d file updates", username, len(updates))
 
-	fs.migrateOrLog(username)
+	fs.MigrateOrLog(username)
 
 	// Process all updates while holding the lock
 	fs.mu.Lock()
@@ -585,7 +344,7 @@ func isValidFileUUID(uuid string) bool {
 }
 
 // handleAddUnsafe assumes the lock is already held
-func (fs *FileSystem) handleAddUnsafe(username Username, change UpdateChange) error {
+func (fs *FileSystem) handleAddUnsafe(username string, change UpdateChange) error {
 	if !isValidFileUUID(change.UUID) {
 		return fmt.Errorf("invalid UUID")
 	}
@@ -665,7 +424,7 @@ func folderChildren(entry FileEntry) ([]any, bool) {
 }
 
 // attachToParentUnsafe assumes the lock is already held
-func (fs *FileSystem) attachToParentUnsafe(username Username, entry FileEntry, uuid string, replacedUUID string, idx PathIndex) {
+func (fs *FileSystem) attachToParentUnsafe(username string, entry FileEntry, uuid string, replacedUUID string, idx PathIndex) {
 	parentUUID, ok := idx[entryToLocation(entry, username)+".folder"]
 	if !ok || parentUUID == uuid {
 		return
@@ -703,7 +462,7 @@ func (fs *FileSystem) attachToParentUnsafe(username Username, entry FileEntry, u
 }
 
 // handleReplaceUnsafe assumes the lock is already held
-func (fs *FileSystem) handleReplaceUnsafe(username Username, change UpdateChange) error {
+func (fs *FileSystem) handleReplaceUnsafe(username string, change UpdateChange) error {
 	entry, err := fs.getFileByUUIDUnsafe(username, change.UUID)
 	if err != nil {
 		return err
@@ -733,7 +492,7 @@ func (fs *FileSystem) handleReplaceUnsafe(username Username, change UpdateChange
 }
 
 // handleDeleteUnsafe assumes the lock is already held
-func (fs *FileSystem) handleDeleteUnsafe(username Username, change UpdateChange) error {
+func (fs *FileSystem) handleDeleteUnsafe(username string, change UpdateChange) error {
 	if !isValidFileUUID(change.UUID) {
 		return fmt.Errorf("invalid UUID")
 	}
@@ -752,12 +511,12 @@ func (fs *FileSystem) handleDeleteUnsafe(username Username, change UpdateChange)
 	return nil
 }
 
-func userIndexPath(username Username) string {
+func userIndexPath(username string) string {
 	return filepath.Join(fileDir, string(username), ".index.json")
 }
 
-func (fs *FileSystem) RenameUserFileSystem(oldUsername Username, newUsername Username) {
-	fs.migrateOrLog(oldUsername)
+func (fs *FileSystem) RenameUserFileSystem(oldUsername string, newUsername string) {
+	fs.MigrateOrLog(oldUsername)
 
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -812,13 +571,13 @@ func (fs *FileSystem) RenameUserFileSystem(oldUsername Username, newUsername Use
 type PathIndex map[string]string
 
 // rebuildPathIndexUnsafe assumes the lock is already held
-func (fs *FileSystem) rebuildPathIndexUnsafe(username Username) (PathIndex, error) {
+func (fs *FileSystem) rebuildPathIndexUnsafe(username string) (PathIndex, error) {
 	return fs.rebuildPathIndexWithPreferredUnsafe(username, nil)
 }
 
 // rebuildPathIndexWithPreferredUnsafe assumes the lock is already held. When
 // duplicate files resolve to one path, preferred records the authoritative UUID.
-func (fs *FileSystem) rebuildPathIndexWithPreferredUnsafe(username Username, preferred PathIndex) (PathIndex, error) {
+func (fs *FileSystem) rebuildPathIndexWithPreferredUnsafe(username string, preferred PathIndex) (PathIndex, error) {
 	userDir := filepath.Join(fileDir, string(username))
 
 	idx := make(PathIndex)
@@ -871,7 +630,7 @@ func (fs *FileSystem) rebuildPathIndexWithPreferredUnsafe(username Username, pre
 }
 
 // loadPathIndexUnsafe assumes the lock is already held
-func (fs *FileSystem) loadPathIndexUnsafe(username Username) (PathIndex, error) {
+func (fs *FileSystem) loadPathIndexUnsafe(username string) (PathIndex, error) {
 	path := userIndexPath(username)
 
 	data, err := os.ReadFile(path)
@@ -891,8 +650,8 @@ func (fs *FileSystem) loadPathIndexUnsafe(username Username) (PathIndex, error) 
 }
 
 // loadPathIndex is the public version that acquires the lock
-func (fs *FileSystem) loadPathIndex(username Username) (PathIndex, error) {
-	fs.migrateOrLog(username)
+func (fs *FileSystem) LoadPathIndex(username string) (PathIndex, error) {
+	fs.MigrateOrLog(username)
 
 	path := userIndexPath(username)
 
@@ -924,7 +683,7 @@ func (fs *FileSystem) loadPathIndex(username Username) (PathIndex, error) {
 }
 
 // savePathIndexUnsafe assumes the lock is already held
-func (fs *FileSystem) savePathIndexUnsafe(username Username, idx PathIndex) error {
+func (fs *FileSystem) savePathIndexUnsafe(username string, idx PathIndex) error {
 	path := userIndexPath(username)
 
 	tmp := path + ".tmp"
@@ -940,13 +699,13 @@ func (fs *FileSystem) savePathIndexUnsafe(username Username, idx PathIndex) erro
 	return os.Rename(tmp, path) // atomic on POSIX
 }
 
-func entryToLocation(entry FileEntry, username Username) string {
+func entryToLocation(entry FileEntry, username string) string {
 	location := strings.ToLower(getStringOrEmpty(entry[2]))
 	if strings.HasPrefix(location, "origin/(c) users/") {
 		parts := strings.Split(location, "/")
 		if len(parts) >= 3 {
 			rest := parts[3:]
-			location = "origin/(c) users/" + string(username.ToLower())
+			location = "origin/(c) users/" + strings.ToLower(username)
 			if len(rest) > 0 {
 				location += "/" + strings.Join(rest, "/")
 			}
@@ -969,7 +728,7 @@ func joinNoClean(a, b string) string {
 	return a + "/" + b
 }
 
-func entryToPath(entry FileEntry, username Username) string {
+func entryToPath(entry FileEntry, username string) string {
 	name := getStringOrEmpty(entry[1]) + getStringOrEmpty(entry[0])
 
 	return strings.ToLower(
@@ -980,7 +739,7 @@ func entryToPath(entry FileEntry, username Username) string {
 	)
 }
 
-func (fs *FileSystem) GetFileStats(username Username, uuids []string) ([]FileStat, error) {
+func (fs *FileSystem) GetFileStats(username string, uuids []string) ([]FileStat, error) {
 	if err := fs.migrateFromLegacy(username); err != nil {
 		return nil, err
 	}
@@ -1021,17 +780,17 @@ func (fs *FileSystem) GetFileStats(username Username, uuids []string) ([]FileSta
 	return stats, nil
 }
 
-func (fs *FileSystem) GetUserPath(username Username) string {
+func (fs *FileSystem) GetUserPath(username string) string {
 	return filepath.Join(fileDir, string(username))
 }
 
-func (fs *FileSystem) migrateOrLog(username Username) {
+func (fs *FileSystem) MigrateOrLog(username string) {
 	if err := fs.migrateFromLegacy(username); err != nil {
 		ofsfErrorf("Migration failed: %v", err)
 	}
 }
 
-func (fs *FileSystem) migrateFromLegacy(username Username) error {
+func (fs *FileSystem) migrateFromLegacy(username string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -1152,7 +911,7 @@ func readFileEntry(path string) (FileEntry, error) {
 }
 
 // getFileByUUIDUnsafe assumes the lock is already held
-func (fs *FileSystem) getFileByUUIDUnsafe(username Username, uuid string) (FileEntry, error) {
+func (fs *FileSystem) getFileByUUIDUnsafe(username string, uuid string) (FileEntry, error) {
 	if !isValidFileUUID(uuid) {
 		return nil, fmt.Errorf("invalid UUID")
 	}
@@ -1166,21 +925,21 @@ func (fs *FileSystem) getFileByUUIDUnsafe(username Username, uuid string) (FileE
 	if entry[0] != ".folder" {
 		switch entry[3].(type) {
 		case map[string]any, []any:
-			entry[3] = JSONStringify(entry[3])
+			entry[3] = jsonString(entry[3])
 		}
 	}
 	return entry, nil
 }
 
 // GetFileByUUID is the public version that acquires the lock
-func (fs *FileSystem) GetFileByUUID(username Username, uuid string) (FileEntry, error) {
+func (fs *FileSystem) GetFileByUUID(username string, uuid string) (FileEntry, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 	return fs.getFileByUUIDUnsafe(username, uuid)
 }
 
 // setFileByUUIDUnsafe assumes the lock is already held
-func (fs *FileSystem) setFileByUUIDUnsafe(username Username, uuid string, file FileEntry) error {
+func (fs *FileSystem) setFileByUUIDUnsafe(username string, uuid string, file FileEntry) error {
 	if !isValidFileUUID(uuid) {
 		return fmt.Errorf("invalid UUID")
 	}
@@ -1194,7 +953,7 @@ func (fs *FileSystem) setFileByUUIDUnsafe(username Username, uuid string, file F
 	if file[0] != ".folder" {
 		switch file[3].(type) {
 		case map[string]any, []any:
-			file[3] = JSONStringify(file[3])
+			file[3] = jsonString(file[3])
 		}
 	}
 
@@ -1214,7 +973,7 @@ func (fs *FileSystem) setFileByUUIDUnsafe(username Username, uuid string, file F
 	return nil
 }
 
-func (fs *FileSystem) calculateTotalSize(username Username) (int, error) {
+func (fs *FileSystem) calculateTotalSize(username string) (int, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
@@ -1245,8 +1004,8 @@ func (fs *FileSystem) calculateTotalSize(username Username) (int, error) {
 	return totalSize, nil
 }
 
-func (fs *FileSystem) GetFilesByUUIDs(username Username, uuids []string) (map[string]FileEntry, error) {
-	fs.migrateOrLog(username)
+func (fs *FileSystem) GetFilesByUUIDs(username string, uuids []string) (map[string]FileEntry, error) {
+	fs.MigrateOrLog(username)
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
@@ -1267,8 +1026,8 @@ func (fs *FileSystem) GetFilesByUUIDs(username Username, uuids []string) (map[st
 	return result, nil
 }
 
-func (fs *FileSystem) DeleteUserFileSystem(username Username) error {
-	fs.migrateOrLog(username)
+func (fs *FileSystem) DeleteUserFileSystem(username string) error {
+	fs.MigrateOrLog(username)
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -1289,8 +1048,8 @@ func (fs *FileSystem) DeleteUserFileSystem(username Username) error {
 	return nil
 }
 
-func (fs *FileSystem) GetUserFileSize(username Username) (string, error) {
-	fs.migrateOrLog(username)
+func (fs *FileSystem) GetUserFileSize(username string) (string, error) {
+	fs.MigrateOrLog(username)
 	size, err := fs.calculateTotalSize(username)
 	if err != nil {
 		return "", err
@@ -1308,7 +1067,7 @@ func (fs *FileSystem) GetUserFileSize(username Username) (string, error) {
 	}
 }
 
-func (fs *FileSystem) GetFilesIndexWithThreshold(username Username, sizeThreshold int) ([]any, error) {
+func (fs *FileSystem) GetFilesIndexWithThreshold(username string, sizeThreshold int) ([]any, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
@@ -1343,7 +1102,7 @@ func (fs *FileSystem) GetFilesIndexWithThreshold(username Username, sizeThreshol
 				if entryCopy[0] == ".folder" {
 					arr, ok := entryCopy[3].([]any)
 					if ok {
-						entryCopy[3] = JSONStringify(arr)
+						entryCopy[3] = jsonString(arr)
 						entryCopy[11] = len(arr)
 					}
 				} else {
@@ -1352,7 +1111,7 @@ func (fs *FileSystem) GetFilesIndexWithThreshold(username Username, sizeThreshol
 					case string:
 						dataStr = entryCopy[3].(string)
 					case []any, map[string]any:
-						dataStr = JSONStringify(entryCopy[3])
+						dataStr = jsonString(entryCopy[3])
 						entryCopy[3] = dataStr
 					}
 					entryCopy[11] = len(dataStr)

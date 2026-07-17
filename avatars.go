@@ -49,16 +49,7 @@ func getUserGroupTagCached(username Username) string {
 	}
 	tag = ""
 	if user, err := getAccountByUsername(username); err == nil {
-		if gid := user.GetString("sys.group"); gid != "" {
-			groupsDataMutex.RLock()
-			for t, data := range groupsData {
-				if string(data.Group.Id) == gid {
-					tag = t
-					break
-				}
-			}
-			groupsDataMutex.RUnlock()
-		}
+		tag = groupTagForUser(user)
 	}
 	userGroupTagCacheMu.Lock()
 	if userGroupTagCache == nil {
@@ -71,6 +62,23 @@ func getUserGroupTagCached(username Username) string {
 
 func InvalidateUserGroupTagCache(username Username) {
 	deleteUnderLock(&userGroupTagCacheMu, userGroupTagCache, username.ToLower())
+}
+
+// groupTagForUser resolves the tag of the group referenced by the user's
+// sys.group id, or "" if the user is not in a group.
+func groupTagForUser(user User) string {
+	gid := user.GetString("sys.group")
+	if gid == "" {
+		return ""
+	}
+	groupsDataMutex.RLock()
+	defer groupsDataMutex.RUnlock()
+	for tag, data := range groupsData {
+		if string(data.Group.Id) == gid {
+			return tag
+		}
+	}
+	return ""
 }
 
 const defaultAvatarURL = "https://raw.githubusercontent.com/Mistium/Origin-OS/main/Resources/no-pfp.jpeg"
@@ -108,19 +116,22 @@ func getUserTierCached(username Username) (string, bool) {
 		}
 		return normalizedTier, true
 	}
+	// Resolve the tier before taking the write lock: GetSubscription can call
+	// InvalidateUserTierCache (via SetSubscription), which locks userTierCacheMu.
 	user, err := getAccountByUsername(Username(username))
+	tier = ""
+	if err == nil {
+		tier = user.GetSubscription().Tier
+	}
 	userTierCacheMu.Lock()
 	if userTierCache == nil {
 		userTierCache = make(map[Username]string)
 	}
-	if err != nil {
-		userTierCache[username] = ""
-		userTierCacheMu.Unlock()
-		return "", false
-	}
-	tier = user.GetSubscription().Tier
 	userTierCache[username] = tier
 	userTierCacheMu.Unlock()
+	if err != nil {
+		return "", false
+	}
 	return tier, true
 }
 

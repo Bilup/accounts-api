@@ -86,6 +86,12 @@ func loadUsers() {
 	idToUserMutex.Unlock()
 	clearOverlayCosmeticsCache()
 	users = loaded
+
+	// Every reload allocates fresh User maps; drop mutexes keyed to the old
+	// map pointers so the registry doesn't grow forever.
+	userMutexesLock.Lock()
+	userPtrMutexes = make(map[uintptr]*sync.Mutex, len(loaded))
+	userMutexesLock.Unlock()
 }
 
 func loadGroupData() {
@@ -448,13 +454,8 @@ func loadKeys() {
 
 func saveKeys() {
 	keysMutex.RLock()
-	idx := make(map[string]int, len(keys))
-	for i, k := range keys {
-		idx[k.Key] = i
-	}
-	keyStringToIdx = idx
+	defer keysMutex.RUnlock()
 	saveJsonFile(KEYS_FILE_PATH, keys)
-	keysMutex.RUnlock()
 }
 
 func loadSystems() {

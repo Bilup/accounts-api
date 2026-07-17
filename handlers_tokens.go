@@ -62,23 +62,6 @@ func createSubToken(c *gin.Context) {
 	}
 
 	userId := user.GetId()
-	store, err := loadTokenStore(userId)
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to load token store"})
-		return
-	}
-
-	activeCount := 0
-	for _, t := range store.Tokens {
-		if !t.Revoked && (t.ExpiresAt == nil || *t.ExpiresAt > time.Now().UnixMilli()) {
-			activeCount++
-		}
-	}
-	if activeCount >= 25 {
-		c.JSON(400, gin.H{"error": "Maximum of 25 active sub-tokens reached"})
-		return
-	}
-
 	tokenID := generateSubTokenID()
 	tokenValue := generateSubTokenValue()
 	now := time.Now().UnixMilli()
@@ -110,9 +93,26 @@ func createSubToken(c *gin.Context) {
 		Websites:    websites,
 	}
 
-	store.Tokens = append(store.Tokens, subToken)
-
-	if err := saveTokenStore(userId, store); err != nil {
+	limitReached := false
+	err := modifyTokenStore(userId, func(store *TokenStore) bool {
+		activeCount := 0
+		for _, t := range store.Tokens {
+			if !t.Revoked && (t.ExpiresAt == nil || *t.ExpiresAt > now) {
+				activeCount++
+			}
+		}
+		if activeCount >= 25 {
+			limitReached = true
+			return false
+		}
+		store.Tokens = append(store.Tokens, subToken)
+		return true
+	})
+	if limitReached {
+		c.JSON(400, gin.H{"error": "Maximum of 25 active sub-tokens reached"})
+		return
+	}
+	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to save token store"})
 		return
 	}
@@ -136,14 +136,14 @@ func listSubTokens(c *gin.Context) {
 	user := currentUser(c)
 
 	userId := user.GetId()
-	store, err := loadTokenStore(userId)
+	storeTokens, err := readTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
 	}
 
-	tokens := make([]SubTokenPublic, 0, len(store.Tokens))
-	for _, t := range store.Tokens {
+	tokens := make([]SubTokenPublic, 0, len(storeTokens))
+	for _, t := range storeTokens {
 		tokens = append(tokens, t.ToPublic())
 	}
 
@@ -170,13 +170,13 @@ func getSubToken(c *gin.Context) {
 
 	user := currentUser(c)
 	userId := user.GetId()
-	store, err := loadTokenStore(userId)
+	tokens, err := readTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
 	}
 
-	for _, t := range store.Tokens {
+	for _, t := range tokens {
 		if t.ID == tokenID {
 			c.JSON(200, t.ToPublic())
 			return
@@ -208,70 +208,76 @@ func updateSubToken(c *gin.Context) {
 		return
 	}
 
-	userId := user.GetId()
-	store, err := loadTokenStore(userId)
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to load token store"})
+	// Validate inputs before touching the store.
+	if req.Name != nil && (*req.Name == "" || len(*req.Name) > 50) {
+		c.JSON(400, gin.H{"error": "Token name must be between 1 and 50 characters"})
 		return
 	}
-
-	for i := range store.Tokens {
-		t := &store.Tokens[i]
-		if t.ID == tokenID {
-			if t.Revoked {
-				c.JSON(400, gin.H{"error": "Cannot update a revoked token"})
+	var permissions []TokenPermission
+	if req.Permissions != nil {
+		validPerms := make(map[TokenPermission]bool)
+		for _, p := range AllPermissions() {
+			validPerms[p] = true
+		}
+		permissions = make([]TokenPermission, 0, len(req.Permissions))
+		for _, p := range req.Permissions {
+			tp := TokenPermission(p)
+			if !validPerms[tp] {
+				c.JSON(400, gin.H{"error": fmt.Sprintf("Invalid permission: %s", p)})
 				return
 			}
-
-			if req.Name != nil {
-				if *req.Name == "" || len(*req.Name) > 50 {
-					c.JSON(400, gin.H{"error": "Token name must be between 1 and 50 characters"})
-					return
-				}
-				t.Name = *req.Name
-			}
-
-			if req.Permissions != nil {
-				validPerms := make(map[TokenPermission]bool)
-				for _, p := range AllPermissions() {
-					validPerms[p] = true
-				}
-
-				permissions := make([]TokenPermission, 0, len(req.Permissions))
-				for _, p := range req.Permissions {
-					tp := TokenPermission(p)
-					if !validPerms[tp] {
-						c.JSON(400, gin.H{"error": fmt.Sprintf("Invalid permission: %s", p)})
-						return
-					}
-					if tp == PermManageTokens {
-						c.JSON(400, gin.H{"error": "Cannot grant tokens:manage permission to sub-tokens"})
-						return
-					}
-					permissions = append(permissions, tp)
-				}
-				t.Permissions = permissions
-			}
-
-			if req.Description != nil {
-				t.Description = *req.Description
-			}
-
-			if req.Websites != nil {
-				t.Websites = req.Websites
-			}
-
-			if err := saveTokenStore(userId, store); err != nil {
-				c.JSON(500, gin.H{"error": "Failed to save token store"})
+			if tp == PermManageTokens {
+				c.JSON(400, gin.H{"error": "Cannot grant tokens:manage permission to sub-tokens"})
 				return
 			}
-
-			c.JSON(200, t.ToPublic())
-			return
+			permissions = append(permissions, tp)
 		}
 	}
 
-	c.JSON(404, gin.H{"error": "Token not found"})
+	userId := user.GetId()
+	var updated *SubTokenPublic
+	revoked := false
+	err := modifyTokenStore(userId, func(store *TokenStore) bool {
+		for i := range store.Tokens {
+			t := &store.Tokens[i]
+			if t.ID != tokenID {
+				continue
+			}
+			if t.Revoked {
+				revoked = true
+				return false
+			}
+			if req.Name != nil {
+				t.Name = *req.Name
+			}
+			if permissions != nil {
+				t.Permissions = permissions
+			}
+			if req.Description != nil {
+				t.Description = *req.Description
+			}
+			if req.Websites != nil {
+				t.Websites = req.Websites
+			}
+			pub := t.ToPublic()
+			updated = &pub
+			return true
+		}
+		return false
+	})
+	if revoked {
+		c.JSON(400, gin.H{"error": "Cannot update a revoked token"})
+		return
+	}
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to save token store"})
+		return
+	}
+	if updated == nil {
+		c.JSON(404, gin.H{"error": "Token not found"})
+		return
+	}
+	c.JSON(200, *updated)
 }
 
 func revokeSubToken(c *gin.Context) {
@@ -286,37 +292,44 @@ func revokeSubToken(c *gin.Context) {
 	tokenID := c.Param("id")
 
 	userId := user.GetId()
-	store, err := loadTokenStore(userId)
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to load token store"})
-		return
-	}
-
-	for i := range store.Tokens {
-		t := &store.Tokens[i]
-		if t.ID == tokenID {
-			if t.Revoked {
-				c.JSON(400, gin.H{"error": "Token is already revoked"})
-				return
+	var tokenValue string
+	alreadyRevoked := false
+	found := false
+	err := modifyTokenStore(userId, func(store *TokenStore) bool {
+		for i := range store.Tokens {
+			t := &store.Tokens[i]
+			if t.ID != tokenID {
+				continue
 			}
-
+			found = true
+			if t.Revoked {
+				alreadyRevoked = true
+				return false
+			}
 			now := time.Now().UnixMilli()
 			t.Revoked = true
 			t.RevokedAt = &now
-
-			if err := saveTokenStore(userId, store); err != nil {
-				c.JSON(500, gin.H{"error": "Failed to save token store"})
-				return
-			}
-
-			removeFromSubTokenIndex(t.Token)
-
-			c.JSON(200, gin.H{"message": "Token revoked successfully", "id": tokenID})
-			return
+			tokenValue = t.Token
+			return true
 		}
+		return false
+	})
+	if alreadyRevoked {
+		c.JSON(400, gin.H{"error": "Token is already revoked"})
+		return
+	}
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to save token store"})
+		return
+	}
+	if !found {
+		c.JSON(404, gin.H{"error": "Token not found"})
+		return
 	}
 
-	c.JSON(404, gin.H{"error": "Token not found"})
+	removeFromSubTokenIndex(tokenValue)
+
+	c.JSON(200, gin.H{"message": "Token revoked successfully", "id": tokenID})
 }
 
 func deleteSubToken(c *gin.Context) {
@@ -331,33 +344,30 @@ func deleteSubToken(c *gin.Context) {
 	tokenID := c.Param("id")
 
 	userId := user.GetId()
-	store, err := loadTokenStore(userId)
+	var tokenValue string
+	found := false
+	err := modifyTokenStore(userId, func(store *TokenStore) bool {
+		newTokens := make([]SubToken, 0, len(store.Tokens))
+		for _, t := range store.Tokens {
+			if t.ID == tokenID {
+				tokenValue = t.Token
+				found = true
+				continue
+			}
+			newTokens = append(newTokens, t)
+		}
+		if !found {
+			return false
+		}
+		store.Tokens = newTokens
+		return true
+	})
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to load token store"})
+		c.JSON(500, gin.H{"error": "Failed to save token store"})
 		return
 	}
-
-	var tokenValue string
-	newTokens := make([]SubToken, 0, len(store.Tokens))
-	found := false
-
-	for _, t := range store.Tokens {
-		if t.ID == tokenID {
-			tokenValue = t.Token
-			found = true
-			continue
-		}
-		newTokens = append(newTokens, t)
-	}
-
 	if !found {
 		c.JSON(404, gin.H{"error": "Token not found"})
-		return
-	}
-
-	store.Tokens = newTokens
-	if err := saveTokenStore(userId, store); err != nil {
-		c.JSON(500, gin.H{"error": "Failed to save token store"})
 		return
 	}
 
@@ -391,26 +401,26 @@ func renameSubToken(c *gin.Context) {
 	}
 
 	userId := user.GetId()
-	store, err := loadTokenStore(userId)
+	found := false
+	err := modifyTokenStore(userId, func(store *TokenStore) bool {
+		for i := range store.Tokens {
+			if store.Tokens[i].ID == tokenID {
+				store.Tokens[i].Name = req.Name
+				found = true
+				return true
+			}
+		}
+		return false
+	})
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to load token store"})
+		c.JSON(500, gin.H{"error": "Failed to save token store"})
 		return
 	}
-
-	for i := range store.Tokens {
-		t := &store.Tokens[i]
-		if t.ID == tokenID {
-			t.Name = req.Name
-			if err := saveTokenStore(userId, store); err != nil {
-				c.JSON(500, gin.H{"error": "Failed to save token store"})
-				return
-			}
-			c.JSON(200, gin.H{"message": "Token renamed successfully", "id": tokenID, "name": req.Name})
-			return
-		}
+	if !found {
+		c.JSON(404, gin.H{"error": "Token not found"})
+		return
 	}
-
-	c.JSON(404, gin.H{"error": "Token not found"})
+	c.JSON(200, gin.H{"message": "Token renamed successfully", "id": tokenID, "name": req.Name})
 }
 
 func listPermissions(c *gin.Context) {
@@ -426,7 +436,7 @@ func listActiveSubTokens(c *gin.Context) {
 	user := currentUser(c)
 
 	userId := user.GetId()
-	store, err := loadTokenStore(userId)
+	storeTokens, err := readTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
@@ -434,7 +444,7 @@ func listActiveSubTokens(c *gin.Context) {
 
 	now := time.Now().UnixMilli()
 	tokens := make([]SubTokenPublic, 0)
-	for _, t := range store.Tokens {
+	for _, t := range storeTokens {
 		if t.Revoked {
 			continue
 		}
@@ -455,13 +465,13 @@ func getSubTokenActivity(c *gin.Context) {
 	tokenID := c.Param("id")
 
 	userId := user.GetId()
-	store, err := loadTokenStore(userId)
+	tokens, err := readTokenStore(userId)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to load token store"})
 		return
 	}
 
-	for _, t := range store.Tokens {
+	for _, t := range tokens {
 		if t.ID == tokenID {
 			status := "active"
 			if t.Revoked {

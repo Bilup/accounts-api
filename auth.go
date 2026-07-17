@@ -33,7 +33,10 @@ func authenticateWithKey(key string) *User {
 	defer usersMutex.RUnlock()
 	for i := range users {
 		if users[i].GetKey() == key {
-			return &users[i]
+			// Copy the map header out of the slice: slice slots can be
+			// swapped by concurrent deletes after the lock is released.
+			user := users[i]
+			return &user
 		}
 	}
 	return nil
@@ -87,13 +90,7 @@ func setKeyNextBilling(userId UserId, key string, nextBilling int64) bool {
 }
 
 func extractAdminToken(authHeader string) string {
-	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-		return authHeader[len("bearer "):]
-	}
-	if authHeader != "" {
-		return authHeader
-	}
-	return ""
+	return stripBearer(authHeader)
 }
 
 func isAdmin(c *gin.Context) bool {

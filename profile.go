@@ -341,26 +341,13 @@ func getProfile(c *gin.Context) {
 		Badges:       calculatedBadges,
 		Subscription: sub,
 		Theme:        foundUser.GetTheme(),
-		GroupTag: func() string {
-			id := foundUser.GetString("sys.group")
-			if id == "" {
-				return ""
-			}
-			groupsDataMutex.RLock()
-			defer groupsDataMutex.RUnlock()
-			for tag, data := range groupsData {
-				if string(data.Group.Id) == id {
-					return tag
-				}
-			}
-			return ""
-		}(),
-		MaxSize:  maxSizeStr,
-		Currency: foundUser.GetCredits(),
-		Index:    userIndex + 1,
-		Private:  foundUser.IsPrivate(),
-		Status:   st,
-		Id:       foundUser.GetId(),
+		GroupTag:     groupTagForUser(foundUser),
+		MaxSize:      maxSizeStr,
+		Currency:     foundUser.GetCredits(),
+		Index:        userIndex + 1,
+		Private:      foundUser.IsPrivate(),
+		Status:       st,
+		Id:           foundUser.GetId(),
 	}
 
 	benefits := foundUser.GetSubscriptionBenefits()

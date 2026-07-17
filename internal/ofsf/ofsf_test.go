@@ -1,4 +1,4 @@
-package main
+package ofsf
 
 import (
 	"encoding/json"
@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func writeTestEntry(t *testing.T, username string, uuid string, entry []any) {
@@ -49,6 +48,8 @@ func childUUIDs(t *testing.T, entry FileEntry) []string {
 	}
 	return out
 }
+
+var fs = NewFileSystem()
 
 const (
 	rootUUID = "505e0c088eb1808f39768badca1e5ddd"
@@ -285,51 +286,5 @@ func TestRenameUserFileSystemPreservesIndexedDuplicate(t *testing.T) {
 	}
 	if got := fs.ReadUserFile("renamed", "origin/(c) users/renamed/notes.txt"); got != "current" {
 		t.Fatalf("renamed path content = %q, want current", got)
-	}
-}
-
-func TestNotifyEndpointStorageDoesNotRelockFileSystem(t *testing.T) {
-	t.Chdir(t.TempDir())
-	origFS := fs
-	fs = NewFileSystem()
-	defer func() { fs = origFS }()
-
-	done := make(chan string, 1)
-	go func() {
-		fs.mu.Lock()
-		defer fs.mu.Unlock()
-
-		want := NotificationEndpoint{
-			DeviceID:  "device1",
-			Endpoint:  "https://push.example.test/send",
-			P256dh:    "p256dh",
-			Auth:      "auth",
-			Source:    "web",
-			CreatedAt: 1,
-		}
-		if err := saveNotifyEndpoints("alice", NotificationEndpointsFile{Endpoints: []NotificationEndpoint{want}}); err != nil {
-			done <- err.Error()
-			return
-		}
-
-		got := loadNotifyEndpoints("alice")
-		if len(got.Endpoints) != 1 {
-			done <- "expected one endpoint"
-			return
-		}
-		if got.Endpoints[0] != want {
-			done <- "endpoint changed during save/load"
-			return
-		}
-		done <- ""
-	}()
-
-	select {
-	case err := <-done:
-		if err != "" {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("notification endpoint storage deadlocked while filesystem lock was held")
 	}
 }

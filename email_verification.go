@@ -112,11 +112,13 @@ func verifyEmailHandler(c *gin.Context) {
 	if !requireField(c, token, "token is required") {
 		return
 	}
+	// Hold the User value (a map), not a pointer into the users slice: slice
+	// slots can be swapped by concurrent deletes once the lock is released.
 	usersMutex.RLock()
-	var foundUser *User
+	var foundUser User
 	for i := range users {
 		if users[i].GetString("sys.email_verify_token") == token {
-			foundUser = &users[i]
+			foundUser = users[i]
 			break
 		}
 	}
@@ -232,11 +234,11 @@ func requestPasswordResetHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "A valid email address is required"})
 		return
 	}
-	var foundUser *User
+	var foundUser User
 	usersMutex.RLock()
 	for i := range users {
 		if strings.EqualFold(strings.TrimSpace(users[i].GetEmail()), email) {
-			foundUser = &users[i]
+			foundUser = users[i]
 			break
 		}
 	}
@@ -278,10 +280,10 @@ func resetPasswordHandler(c *gin.Context) {
 		return
 	}
 	usersMutex.RLock()
-	var foundUser *User
+	var foundUser User
 	for i := range users {
 		if users[i].GetString("sys.reset_token") == token {
-			foundUser = &users[i]
+			foundUser = users[i]
 			break
 		}
 	}
@@ -298,7 +300,7 @@ func resetPasswordHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Reset token has expired"})
 		return
 	}
-	SetPasswordV1(*foundUser, req.NewPassword)
+	SetPasswordV1(foundUser, req.NewPassword)
 	foundUser.Set("sys.reset_token", "")
 	foundUser.Set("sys.reset_sent", 0)
 	foundUser.Set("sys.reset_expires", 0)

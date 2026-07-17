@@ -128,7 +128,9 @@ func getStringSlice(u User, key string) []string {
 	if v, ok := u[key]; ok {
 		switch s := v.(type) {
 		case []string:
-			return s
+			out := make([]string, len(s))
+			copy(out, s)
+			return out
 		case []any:
 			out := make([]string, 0, len(s))
 			for _, val := range s {
