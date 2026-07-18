@@ -289,8 +289,15 @@ func getProfile(c *gin.Context) {
 	var isFollowedBy *bool
 
 	if authKey != "" {
-		// Authenticate the user with the provided auth key
+		// Authenticate the user with the provided auth key.
+		// Fall back to sub-tokens so scoped tokens still resolve the
+		// follow relationship (otherwise "followed" is always false for them).
 		authenticatedUser := authenticateWithKey(authKey)
+		if authenticatedUser == nil {
+			if subUser, _, err := authenticateWithSubTokenFast(authKey); err == nil && subUser != nil {
+				authenticatedUser = subUser
+			}
+		}
 		if authenticatedUser != nil {
 			authenticatedId := authenticatedUser.GetId()
 
