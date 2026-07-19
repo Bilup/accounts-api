@@ -22,9 +22,12 @@ func authenticateWithKey(key string) *User {
 	idToUserMutex.RUnlock()
 	if ok {
 		usersMutex.RLock()
-		user := users[idx]
+		var user User
+		if idx >= 0 && idx < len(users) {
+			user = users[idx]
+		}
 		usersMutex.RUnlock()
-		if user.GetKey() == key {
+		if user != nil && user.GetKey() == key {
 			return &user
 		}
 	}

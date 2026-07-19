@@ -256,6 +256,8 @@ func shouldConvertToStill(c *gin.Context, tier string, contentType string, metaE
 
 func notModified(c *gin.Context, clientEtag, etag string) bool {
 	if clientEtag == etag {
+		c.Header("ETag", etag)
+		c.Header("Cache-Control", imageCacheControl)
 		c.Status(http.StatusNotModified)
 		return true
 	}
@@ -335,6 +337,9 @@ func avatarHandler(c *gin.Context) {
 	etagQuoted := `"` + cacheKey + `"`
 
 	if c.Request.Method == http.MethodHead {
+		if notModified(c, clientEtag, etagQuoted) {
+			return
+		}
 		c.Header("Content-Type", contentType)
 		c.Header("Cache-Control", imageCacheControl)
 		c.Header("ETag", etagQuoted)
@@ -503,29 +508,52 @@ func overlayHandler(c *gin.Context) {
 		return
 	}
 	overlayName := getActiveOverlayCached(userId)
-	if overlayName == "" {
+	if overlayName == "" || strings.Contains(overlayName, "..") || strings.ContainsAny(overlayName, `/\`) {
 		sendEmpty(c)
 		return
 	}
 
 	path := filepath.Join(COSMETICS_ASSETS_PATH, "overlays", overlayName+".gif")
-	if !fileExists(path) {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
 		sendEmpty(c)
 		return
 	}
 
+	etagQuoted := fmt.Sprintf(`"%s-%d"`, overlayName, info.ModTime().UnixNano())
+	if notModified(c, c.GetHeader("If-None-Match"), etagQuoted) {
+		return
+	}
+	c.Header("ETag", etagQuoted)
+	c.Header("Content-Type", "image/gif")
 	c.Header("Cache-Control", imageCacheControl)
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
+		return
+	}
 	c.File(path)
 }
 
-func sendEmpty(c *gin.Context) {
-	img := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+var emptyPixelPNG = func() []byte {
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		c.Status(http.StatusInternalServerError)
+	png.Encode(&buf, image.NewNRGBA(image.Rect(0, 0, 1, 1)))
+	return buf.Bytes()
+}()
+
+const emptyPixelEtag = `"empty"`
+
+func sendEmpty(c *gin.Context) {
+	if notModified(c, c.GetHeader("If-None-Match"), emptyPixelEtag) {
 		return
 	}
-	c.Data(http.StatusOK, "image/png", buf.Bytes())
+	c.Header("ETag", emptyPixelEtag)
+	c.Header("Cache-Control", imageCacheControl)
+	if c.Request.Method == http.MethodHead {
+		c.Header("Content-Type", "image/png")
+		c.Status(http.StatusOK)
+		return
+	}
+	c.Data(http.StatusOK, "image/png", emptyPixelPNG)
 }
 
 const maxImagePixels = 50 * 1000 * 1000

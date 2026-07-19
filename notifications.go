@@ -34,10 +34,11 @@ func getNotifications(c *gin.Context) {
 	notifications := make([]map[string]any, 0)
 
 	eventsHistoryMutex.RLock()
-	userEvents, exists := eventsHistory[userId]
+	userEvents := make([]Event, len(eventsHistory[userId]))
+	copy(userEvents, eventsHistory[userId])
 	eventsHistoryMutex.RUnlock()
 
-	if exists {
+	if len(userEvents) > 0 {
 		for _, event := range userEvents {
 			if event.Timestamp >= cutoffTime {
 				notification := map[string]any{}

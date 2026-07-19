@@ -16,5 +16,8 @@ var (
 )
 
 func loadOverlays() {
-	overlayManifest = loadJSONOrDefault(filepath.Join(COSMETICS_ASSETS_PATH, "overlays", "-manifest.json"), []Overlay(nil))
+	manifest := loadJSONOrDefault(filepath.Join(COSMETICS_ASSETS_PATH, "overlays", "-manifest.json"), []Overlay(nil))
+	overlayMu.Lock()
+	overlayManifest = manifest
+	overlayMu.Unlock()
 }

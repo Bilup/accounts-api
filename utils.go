@@ -704,17 +704,15 @@ func deleteAccountAtIndexFast(idx int) error {
 	removedUsername := removedUser.GetUsername().ToLower()
 	removedKey := removedUser.GetKey()
 
-	users[idx] = users[len(users)-1]
-	users = users[:len(users)-1]
+	users = append(users[:idx], users[idx+1:]...)
 
 	idToUserMutex.Lock()
 	delete(idToUser, removedUserId)
 	delete(usernameToId, removedUsername)
 	delete(keyToUserIdx, removedKey)
-	// The user swapped into idx keeps its old position in keyToUserIdx; fix it.
-	if idx < len(users) {
-		if swappedKey := users[idx].GetKey(); swappedKey != "" {
-			keyToUserIdx[swappedKey] = idx
+	for i := idx; i < len(users); i++ {
+		if k := users[i].GetKey(); k != "" {
+			keyToUserIdx[k] = i
 		}
 	}
 	idToUserMutex.Unlock()

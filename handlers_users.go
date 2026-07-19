@@ -43,9 +43,12 @@ func getAccountsBy(key string, value string, max int) ([]User, error) {
 		idToUserMutex.RUnlock()
 		if ok {
 			usersMutex.RLock()
-			user := users[idx]
+			var user User
+			if idx >= 0 && idx < len(users) {
+				user = users[idx]
+			}
 			usersMutex.RUnlock()
-			if user.GetKey() == value {
+			if user != nil && user.GetKey() == value {
 				matches = append(matches, user)
 				if max != -1 && len(matches) >= max {
 					return matches, nil

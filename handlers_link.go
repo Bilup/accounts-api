@@ -1,35 +1,55 @@
 package main
 
 import (
-	"crypto/md5"
-	"fmt"
+	"crypto/rand"
+	"encoding/hex"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-var usedCodesMutex sync.RWMutex
-var usedCodes = make(map[string]string)
-var counter atomic.Int64
+const linkCodeTTL = 10 * time.Minute
+
+type linkCodeEntry struct {
+	token     string
+	createdAt time.Time
+}
+
+var usedCodesMutex sync.Mutex
+var usedCodes = make(map[string]linkCodeEntry)
+
+func purgeExpiredLinkCodesLocked() {
+	cutoff := time.Now().Add(-linkCodeTTL)
+	for code, entry := range usedCodes {
+		if entry.createdAt.Before(cutoff) {
+			delete(usedCodes, code)
+		}
+	}
+}
 
 func generateUniqueLinkCode() string {
 	for {
-		c := counter.Add(1)
-		timestamp := time.Now().UnixNano()
-		hash := md5.Sum(fmt.Appendf(nil, "%d-%d", timestamp, c))
-		code := strings.ToUpper(fmt.Sprintf("%x", hash)[:6])
+		b := make([]byte, 3)
+		if _, err := rand.Read(b); err != nil {
+			panic("failed to generate link code: " + err.Error())
+		}
+		code := strings.ToUpper(hex.EncodeToString(b))
 
 		usedCodesMutex.Lock()
+		purgeExpiredLinkCodesLocked()
 		if _, exists := usedCodes[code]; !exists {
-			usedCodes[code] = ""
+			usedCodes[code] = linkCodeEntry{createdAt: time.Now()}
 			usedCodesMutex.Unlock()
 			return code
 		}
 		usedCodesMutex.Unlock()
 	}
+}
+
+func linkCodeValid(entry linkCodeEntry) bool {
+	return time.Since(entry.createdAt) < linkCodeTTL
 }
 
 func getLinkCode(c *gin.Context) {
@@ -42,9 +62,10 @@ func linkCodeToAccount(c *gin.Context) {
 
 	usedCodesMutex.Lock()
 	defer usedCodesMutex.Unlock()
-	if _, exists := usedCodes[code]; exists {
+	if entry, exists := usedCodes[code]; exists && linkCodeValid(entry) {
 		user := currentUser(c)
-		usedCodes[code] = user.GetKey()
+		entry.token = user.GetKey()
+		usedCodes[code] = entry
 		c.JSON(200, "Linked Successfully")
 		return
 	}
@@ -53,9 +74,9 @@ func linkCodeToAccount(c *gin.Context) {
 
 func getLinkStatus(c *gin.Context) {
 	code := c.Query("code")
-	usedCodesMutex.RLock()
-	defer usedCodesMutex.RUnlock()
-	if val, exists := usedCodes[code]; exists && val != "" {
+	usedCodesMutex.Lock()
+	defer usedCodesMutex.Unlock()
+	if entry, exists := usedCodes[code]; exists && entry.token != "" && linkCodeValid(entry) {
 		c.JSON(200, gin.H{"status": "linked"})
 	} else {
 		c.JSON(404, gin.H{"status": "not found"})
@@ -64,11 +85,11 @@ func getLinkStatus(c *gin.Context) {
 
 func getLinkedUser(c *gin.Context) {
 	code := c.Query("code")
-	usedCodesMutex.RLock()
-	defer usedCodesMutex.RUnlock()
-	if val, exists := usedCodes[code]; exists && val != "" {
-		c.JSON(200, gin.H{"linked": true, "token": val})
+	usedCodesMutex.Lock()
+	defer usedCodesMutex.Unlock()
+	if entry, exists := usedCodes[code]; exists && entry.token != "" && linkCodeValid(entry) {
 		delete(usedCodes, code)
+		c.JSON(200, gin.H{"linked": true, "token": entry.token})
 	} else {
 		c.JSON(404, gin.H{"linked": false, "token": ""})
 	}

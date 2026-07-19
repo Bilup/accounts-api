@@ -152,7 +152,7 @@ func renderBioRegex(bio string, profile User, otherKeys profileResp) string {
 					return "0%"
 				}
 
-				current := getFloatOrDefault(safeProfile["sys.currency"], 0.0)
+				current, _ := strconv.ParseFloat(safeProfile["sys.currency"], 64)
 				return fmt.Sprintf("%.2f%%", (current/total)*100)
 			}
 

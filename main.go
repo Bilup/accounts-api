@@ -357,9 +357,9 @@ func main() {
 	// Linking endpoints
 	link := r.Group("/link")
 	{
-		link.GET("/code", getLinkCode)
-		link.GET("/status", getLinkStatus)
-		link.GET("/user", getLinkedUser)
+		link.GET("/code", rateLimit("default"), getLinkCode)
+		link.GET("/status", rateLimit("default"), getLinkStatus)
+		link.GET("/user", rateLimit("default"), getLinkedUser)
 
 		link.POST("/code", requiresAuth, requirePermission(PermManageSettings), linkCodeToAccount)
 	}
