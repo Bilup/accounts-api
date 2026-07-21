@@ -30,6 +30,11 @@ func followUser(c *gin.Context) {
 		return
 	}
 
+	if user.HasBlocked(targetId) {
+		c.JSON(400, gin.H{"error": "Unblock this user before following them"})
+		return
+	}
+
 	if targetId == currentId {
 		c.JSON(400, gin.H{"error": "You cannot follow yourself"})
 		return

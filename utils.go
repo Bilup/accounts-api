@@ -372,7 +372,13 @@ func extractAuthKey(c *gin.Context) string {
 	if authKey := c.Query("auth"); authKey != "" {
 		return authKey
 	}
-	return stripBearer(c.GetHeader("Authorization"))
+	if header := stripBearer(c.GetHeader("Authorization")); header != "" {
+		return header
+	}
+	if cookie, err := c.Cookie(sessionCookieName); err == nil && cookie != "" {
+		return cookie
+	}
+	return ""
 }
 
 func isRequestAuthenticated(c *gin.Context) bool {

@@ -34,6 +34,10 @@ func sendFriendRequest(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "You cant send friend requests to this user"})
 		return
 	}
+	if sender.HasBlocked(target.GetId()) {
+		c.JSON(400, gin.H{"error": "Unblock this user before sending a friend request"})
+		return
+	}
 	if sender.IsFriend(targetLower) {
 		c.JSON(400, gin.H{"error": "Already Friends"})
 		return

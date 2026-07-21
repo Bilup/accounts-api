@@ -12,6 +12,8 @@ const USERS_FILE_PATH = "./users.json"
 
 const DELETED_ACCOUNTS_PATH = "./deleted_accounts.json"
 
+const sessionCookieName = "claw_session"
+
 const LITE_SUBSCRIPTION_KEY = "4f229157f0c40f5a98cbf28efd39cfe8"
 
 var (
