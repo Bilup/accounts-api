@@ -15,7 +15,7 @@ func followUser(c *gin.Context) {
 	if !requireField(c, targetUsername, "Target username is required") {
 		return
 	}
-	targetId := targetUsername.Id()
+	targetId := getIdByUsername(targetUsername)
 	currentId := user.GetId()
 	targetUsername = targetUsername.ToLower()
 
@@ -25,7 +25,7 @@ func followUser(c *gin.Context) {
 		return
 	}
 
-	if isUserBlockedBy(targetId.User(), currentId) {
+	if isUserBlockedBy(getUserById(targetId), currentId) {
 		c.JSON(400, gin.H{"error": "You cant follow this user"})
 		return
 	}
@@ -45,7 +45,7 @@ func followUser(c *gin.Context) {
 	if _, exists := followersData[targetId]; !exists {
 		followersData[targetId] = FollowerData{
 			Followers: make([]UserId, 0),
-			Username:  targetId.User().GetUsername(),
+			Username:  getUserById(targetId).GetUsername(),
 			UserId:    targetId,
 		}
 	}
@@ -87,7 +87,7 @@ func unfollowUser(c *gin.Context) {
 	if !requireField(c, targetUsername, "Target username is required") {
 		return
 	}
-	targetId := targetUsername.Id()
+	targetId := getIdByUsername(targetUsername)
 	if !accountExists(targetId) {
 		c.JSON(404, gin.H{"error": "User not found"})
 		return
@@ -162,7 +162,7 @@ func getFollowing(c *gin.Context) {
 		return
 	}
 
-	targetId := name.Id()
+	targetId := getIdByUsername(name)
 	// Check if the user exists
 	if !accountExists(targetId) {
 		c.JSON(404, gin.H{"error": "User not found"})
@@ -193,7 +193,7 @@ func getFollowers(c *gin.Context) {
 	}
 
 	// Check if the user exists
-	targetId := name.Id()
+	targetId := getIdByUsername(name)
 	if !accountExists(targetId) {
 		c.JSON(404, gin.H{"error": "User not found"})
 		return
@@ -210,7 +210,7 @@ func getFollowers(c *gin.Context) {
 		return
 	}
 	for _, follower := range data.Followers {
-		followers = append(followers, follower.User().GetUsername())
+		followers = append(followers, getUserById(follower).GetUsername())
 	}
 
 	c.JSON(200, gin.H{"followers": followers})

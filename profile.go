@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"claw/internal/timefmt"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -48,7 +50,7 @@ type profileResp struct {
 func renderBioRegex(bio string, profile User, otherKeys profileResp) string {
 	safeProfile := map[string]string{}
 	mu := getMutexForUser(profile)
-	mu.Lock()
+	mu.RLock()
 	for k, v := range profile {
 		lk := strings.ToLower(k)
 		if k == "key" || k == "password" || k == "sys.salt" || k == "email" ||
@@ -67,7 +69,7 @@ func renderBioRegex(bio string, profile User, otherKeys profileResp) string {
 			safeProfile[k] = strconv.FormatBool(val)
 		}
 	}
-	mu.Unlock()
+	mu.RUnlock()
 	safeProfile["bio"] = otherKeys.Bio
 	safeProfile["followers"] = fmt.Sprint(otherKeys.Followers)
 	safeProfile["following"] = fmt.Sprint(otherKeys.Following)
@@ -102,10 +104,10 @@ func renderBioRegex(bio string, profile User, otherKeys profileResp) string {
 			if format == "" {
 				format = "15:04"
 			}
-			format = normalizeUserTimeLayout(format)
+			format = timefmt.NormalizeUserTimeLayout(format)
 
 			tzStr := profile.GetString("timezone")
-			offsetHours, ok := parseUTCOffsetHours(tzStr)
+			offsetHours, ok := timefmt.ParseUTCOffsetHours(tzStr)
 			if !ok {
 				offsetHours = 0
 			}

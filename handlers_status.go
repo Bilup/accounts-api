@@ -682,7 +682,7 @@ func statusGetHTTP(c *gin.Context) {
 	if !requireField(c, name, "name parameter missing") {
 		return
 	}
-	uid := Username(name).ToLower().Id()
+	uid := getIdByUsername(Username(name).ToLower())
 	if uid == "" {
 		c.JSON(404, gin.H{"error": "user not found"})
 		return

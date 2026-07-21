@@ -1,49 +1,16 @@
 package main
 
 import (
+	"claw/internal/config"
 	"crypto/hmac"
-	"crypto/md5"
-	crypto_rand "crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
 
-	"golang.org/x/crypto/pbkdf2"
+	"claw/internal/pwhash"
 )
-
-func md5Hex(input string) string {
-	h := md5.Sum([]byte(input))
-	return hex.EncodeToString(h[:])
-}
-
-func isMD5Hex(s string) bool {
-	if len(s) != 32 {
-		return false
-	}
-	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-			return false
-		}
-	}
-	return true
-}
-
-func HashPBKDF2(rawPassword string, salt string, iterations int) string {
-	derived := pbkdf2.Key([]byte(rawPassword), []byte(salt), iterations, 32, sha256.New)
-	return hex.EncodeToString(derived)
-}
-
-func generateSalt() string {
-	b := make([]byte, 32)
-	if _, err := crypto_rand.Read(b); err != nil {
-		panic("failed to generate salt: " + err.Error())
-	}
-	return hex.EncodeToString(b)
-}
 
 var (
 	userSaltCache   = make(map[UserId]string)
@@ -74,12 +41,12 @@ func getOrCreateSalt(user User) string {
 		return loaded
 	}
 
-	if user.GetPassVersion() == 1 && PBKDF2_SALT != "" {
-		setUserSalt(user, PBKDF2_SALT)
-		return PBKDF2_SALT
+	if user.GetPassVersion() == 1 && config.PBKDF2_SALT != "" {
+		setUserSalt(user, config.PBKDF2_SALT)
+		return config.PBKDF2_SALT
 	}
 
-	salt := generateSalt()
+	salt := pwhash.GenerateSalt()
 	setUserSalt(user, salt)
 	return salt
 }
@@ -92,7 +59,7 @@ func setUserSalt(user User, salt string) {
 	userSaltCache[userId] = salt
 	userSaltCacheMu.Unlock()
 
-	dir := filepath.Join(USERDATA_PATH, string(userId))
+	dir := filepath.Join(config.USERDATA_PATH, string(userId))
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Printf("[salt] error creating userdata dir for %s: %v", userId, err)
 		return
@@ -107,13 +74,13 @@ func setUserSalt(user User, salt string) {
 func VerifyPassword(user User, rawPassword string) (bool, bool) {
 	switch user.GetPassVersion() {
 	case 0:
-		if md5Hex(rawPassword) == user.GetPassword() {
+		if pwhash.MD5Hex(rawPassword) == user.GetPassword() {
 			return true, true
 		}
 		return false, false
 	case 1:
 		salt := getOrCreateSalt(user)
-		candidate := HashPBKDF2(rawPassword, salt, PBKDF2_ITERATIONS)
+		candidate := pwhash.HashPBKDF2(rawPassword, salt, config.PBKDF2_ITERATIONS)
 		if hmac.Equal([]byte(candidate), []byte(user.GetPassword())) {
 			return true, false
 		}
@@ -125,14 +92,14 @@ func VerifyPassword(user User, rawPassword string) (bool, bool) {
 
 func UpgradePasswordToV1(user User, rawPassword string) {
 	salt := getOrCreateSalt(user)
-	stored := HashPBKDF2(rawPassword, salt, PBKDF2_ITERATIONS)
+	stored := pwhash.HashPBKDF2(rawPassword, salt, config.PBKDF2_ITERATIONS)
 	user.Set("password", stored)
 	user.Set("sys.passv", 1)
 }
 
 func SetPasswordV1(user User, rawPassword string) {
 	salt := getOrCreateSalt(user)
-	stored := HashPBKDF2(rawPassword, salt, PBKDF2_ITERATIONS)
+	stored := pwhash.HashPBKDF2(rawPassword, salt, config.PBKDF2_ITERATIONS)
 	user.Set("password", stored)
 	user.Set("sys.passv", 1)
 }

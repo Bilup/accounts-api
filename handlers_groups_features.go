@@ -76,7 +76,7 @@ func createAnnouncement(c *gin.Context) {
 			if member.MutedAnnouncements {
 				continue
 			}
-			notifyGroupMember(member.UserId.User(), user, groupTag, "["+groupTag+"] "+title, body)
+			notifyGroupMember(getUserById(member.UserId), user, groupTag, "["+groupTag+"] "+title, body)
 		}
 	}()
 

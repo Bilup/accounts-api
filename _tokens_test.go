@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -146,12 +147,12 @@ func TestTokenStoreLoadSave(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	origPath := USERDATA_PATH
-	USERDATA_PATH = tmpDir
-	defer func() { USERDATA_PATH = origPath }()
+	origPath := config.USERDATA_PATH
+	config.USERDATA_PATH = tmpDir
+	defer func() { config.USERDATA_PATH = origPath }()
 
 	username := Username("testuser")
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	store, err := loadTokenStore(userId)
 	if err != nil {
 		t.Fatalf("Failed to load token store: %v", err)
@@ -211,12 +212,12 @@ func TestTokenStoreDirectoryCreation(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	origPath := USERDATA_PATH
-	USERDATA_PATH = filepath.Join(tmpDir, "nested", "path")
-	defer func() { USERDATA_PATH = origPath }()
+	origPath := config.USERDATA_PATH
+	config.USERDATA_PATH = filepath.Join(tmpDir, "nested", "path")
+	defer func() { config.USERDATA_PATH = origPath }()
 
 	username := Username("newuser")
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	store, err := loadTokenStore(userId)
 	if err != nil {
 		t.Fatalf("Failed to load token store with new path: %v", err)
@@ -227,7 +228,7 @@ func TestTokenStoreDirectoryCreation(t *testing.T) {
 		t.Fatalf("Failed to save token store with new path: %v", err)
 	}
 
-	dirPath := filepath.Join(USERDATA_PATH, string(userId))
+	dirPath := filepath.Join(config.USERDATA_PATH, string(userId))
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 		t.Fatalf("Token directory should exist at %s", dirPath)
 	}

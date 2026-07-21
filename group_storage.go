@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"encoding/json"
 	"log"
 	"os"
@@ -12,9 +13,9 @@ func groupDirPath(groupTag string) string {
 	data, ok := groupsData[groupTag]
 	groupsDataMutex.RUnlock()
 	if ok && data != nil && data.Group.Id != "" {
-		return filepath.Join(GROUPS_FILE_PATH, string(data.Group.Id))
+		return filepath.Join(config.GROUPS_FILE_PATH, string(data.Group.Id))
 	}
-	return filepath.Join(GROUPS_FILE_PATH, "unknown_"+groupTag)
+	return filepath.Join(config.GROUPS_FILE_PATH, "unknown_"+groupTag)
 }
 
 func getGroupBannerPath(groupTag string) string {

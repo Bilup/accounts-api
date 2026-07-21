@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	crypto_rand "crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"claw/internal/captcha"
 
 	"github.com/gin-gonic/gin"
 )
@@ -39,15 +42,10 @@ func getAccountsBy(key string, value string, max int) ([]User, error) {
 		}
 	case "key":
 		idToUserMutex.RLock()
-		idx, ok := keyToUserIdx[value]
+		id, ok := keyToId[value]
 		idToUserMutex.RUnlock()
 		if ok {
-			usersMutex.RLock()
-			var user User
-			if idx >= 0 && idx < len(users) {
-				user = users[idx]
-			}
-			usersMutex.RUnlock()
+			user := getUserById(id)
 			if user != nil && user.GetKey() == value {
 				matches = append(matches, user)
 				if max != -1 && len(matches) >= max {
@@ -321,7 +319,7 @@ func getUser(c *gin.Context) {
 
 func userToNet(user User) User {
 	mu := getMutexForUser(user)
-	mu.Lock()
+	mu.RLock()
 	userCopy := make(User, len(user)+4)
 	for k, v := range user {
 		if k == "password" || k == "sys.salt" {
@@ -329,7 +327,7 @@ func userToNet(user User) User {
 		}
 		userCopy[k] = v
 	}
-	mu.Unlock()
+	mu.RUnlock()
 
 	userCopy["sys.friends"] = user.GetFriendUsers()
 	userCopy["sys.requests"] = user.GetRequestedUsers()
@@ -530,7 +528,7 @@ func registerUser(c *gin.Context) {
 		return
 	}
 
-	if !verifyHCaptcha(req.Captcha) {
+	if !captcha.VerifyHCaptcha(req.Captcha) {
 		c.JSON(400, gin.H{"error": "hCaptcha verification failed"})
 		return
 	}
@@ -616,7 +614,7 @@ func findUserSize(username Username) int {
 	}
 	totalSize := 0
 	mu := getMutexForUser(user)
-	mu.Lock()
+	mu.RLock()
 	for k, v := range user {
 		if strings.HasPrefix(k, "sys.") {
 			continue
@@ -647,7 +645,7 @@ func findUserSize(username Username) int {
 			totalSize += 100
 		}
 	}
-	mu.Unlock()
+	mu.RUnlock()
 	return totalSize
 }
 func canUpdateUsernameUnsafe(username Username) (bool, string) {
@@ -659,10 +657,11 @@ func canUpdateUsernameUnsafe(username Username) (bool, string) {
 		return false, msg
 	}
 	usernameLower := username.ToLower()
-	for _, user := range users {
-		if user.GetUsername().ToLower() == usernameLower {
-			return false, "Username already in use"
-		}
+	idToUserMutex.RLock()
+	_, taken := usernameToId[usernameLower]
+	idToUserMutex.RUnlock()
+	if taken {
+		return false, "Username already in use"
 	}
 
 	return true, "Can update username"
@@ -730,8 +729,7 @@ func updateUser(c *gin.Context) {
 			c.JSON(400, gin.H{"error": "Banner must be a valid data URI"})
 			return
 		}
-		userIndex := getIdxOfAccountBy("username", string(username))
-		if userIndex == -1 {
+		if getIdByUsername(username) == "" {
 			c.JSON(403, gin.H{"error": "User not found"})
 			return
 		}
@@ -800,20 +798,11 @@ func updateUser(c *gin.Context) {
 	}
 
 	if key == "email" {
-		usersMutex.RLock()
-		emailConflict := false
-		for _, u := range users {
-			mu := getMutexForUser(u)
-			mu.Lock()
-			em, _ := u["email"].(string)
-			mu.Unlock()
-			if strings.EqualFold(em, stringValue) {
-				emailConflict = true
-				break
-			}
-		}
-		usersMutex.RUnlock()
-		if emailConflict {
+		emailLower := strings.ToLower(strings.TrimSpace(stringValue))
+		idToUserMutex.RLock()
+		conflictId, emailConflict := emailToId[emailLower]
+		idToUserMutex.RUnlock()
+		if emailConflict && conflictId != user.GetId() {
 			c.JSON(400, gin.H{"error": "Email already in use"})
 			return
 		}
@@ -1132,8 +1121,7 @@ func PerformCreditTransfer(fromUsername, toUsername Username, amount float64, no
 		systemsMutex.RUnlock()
 
 		// Apply tax to taxRecipient if exists
-		if idx := getIdxOfAccountBy("username", string(taxRecipient)); taxRecipient != toUser.GetUsername() && idx != -1 {
-			taxUser, _ := getUserByIdx(idx)
+		if taxUser, err := getAccountByUsername(taxRecipient); err == nil && taxRecipient != toUser.GetUsername() {
 			newBalance := roundVal(taxUser.GetCredits() + taxRecipientShare)
 			taxUser.applyTransaction(newBalance, Transaction{
 				Note:      "Daily credit",
@@ -1344,9 +1332,11 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 		users[idx] = banned
 		idToUserMutex.Lock()
 		idToUser[oldId] = banned
-		delete(keyToUserIdx, oldKey)
+		delete(keyToId, oldKey)
 		idToUserMutex.Unlock()
 		usersMutex.Unlock()
+		dropMutexForUser(oldUser)
+		saveUser(oldId)
 	} else {
 		deleteAccountAtIndexFast(idx)
 	}
@@ -1604,7 +1594,7 @@ func claimDaily(c *gin.Context) {
 func loadDailyClaims() map[Username]float64 {
 	dailyClaimMutex.Lock()
 	defer dailyClaimMutex.Unlock()
-	return loadJSONOrDefault(DAILY_CLAIMS_FILE_PATH, map[Username]float64{})
+	return loadJSONOrDefault(config.DAILY_CLAIMS_FILE_PATH, map[Username]float64{})
 }
 
 // saveDailyClaims saves daily claims data to rotur_daily.json
@@ -1616,7 +1606,7 @@ func saveDailyClaims(claimsData map[Username]float64) {
 		return
 	}
 
-	atomicWrite(DAILY_CLAIMS_FILE_PATH, data, 0644)
+	atomicWrite(config.DAILY_CLAIMS_FILE_PATH, data, 0644)
 }
 
 func acceptTos(c *gin.Context) {
@@ -1641,14 +1631,15 @@ func tosUpdate(c *gin.Context) {
 		return
 	}
 
-	// Loop through all users and set sys.tos_accepted to false
 	usersMutex.Lock()
+	ids := make([]UserId, 0, len(users))
 	for i := range users {
 		users[i]["sys.tos_accepted"] = false
+		ids = append(ids, users[i].GetId())
 	}
 	usersMutex.Unlock()
 
-	go saveUsers()
+	saveUsersBulk(ids)
 
 	c.JSON(200, gin.H{"message": "All users marked as not having accepted the updated Terms of Service"})
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -52,11 +53,11 @@ func isDisposableEmail(email string) bool {
 }
 
 func sendVerifyEmail(toEmail string, username string, token string) {
-	if SMTP_HOST == "" || SMTP_FROM == "" || BASE_URL == "" {
+	if config.SMTP_HOST == "" || config.SMTP_FROM == "" || config.BASE_URL == "" {
 		log.Printf("[email] SMTP not configured, skipping verification email for %s", toEmail)
 		return
 	}
-	verifyURL := fmt.Sprintf("%s/verify_email?token=%s", strings.TrimRight(BASE_URL, "/"), token)
+	verifyURL := fmt.Sprintf("%s/verify_email?token=%s", strings.TrimRight(config.BASE_URL, "/"), token)
 	subject := "Verify your Rotur email"
 	body := fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=\"utf-8\"\r\n\r\n"+
@@ -67,20 +68,20 @@ func sendVerifyEmail(toEmail string, username string, token string) {
 			"<p>\"%s\"</p>"+
 			"<p style=\"color:#777;font-size:13px;margin-top:16px;\">If you did not create this account, you can ignore this email.</p>"+
 			"</div>",
-		SMTP_FROM, toEmail, subject, username, verifyURL, verifyURL,
+		config.SMTP_FROM, toEmail, subject, username, verifyURL, verifyURL,
 	)
 	var auth smtp.Auth
-	if SMTP_USER != "" && SMTP_PASS != "" {
-		auth = smtp.PlainAuth("", SMTP_USER, SMTP_PASS, SMTP_HOST)
+	if config.SMTP_USER != "" && config.SMTP_PASS != "" {
+		auth = smtp.PlainAuth("", config.SMTP_USER, config.SMTP_PASS, config.SMTP_HOST)
 	}
-	addr := SMTP_HOST + ":" + SMTP_PORT
-	if err := smtp.SendMail(addr, auth, SMTP_FROM, []string{toEmail}, []byte(body)); err != nil {
+	addr := config.SMTP_HOST + ":" + config.SMTP_PORT
+	if err := smtp.SendMail(addr, auth, config.SMTP_FROM, []string{toEmail}, []byte(body)); err != nil {
 		log.Printf("[email] failed to send verification to %s: %v", toEmail, err)
 	}
 }
 
 func sendResetEmail(toEmail string, username Username, token string) {
-	if SMTP_HOST == "" || SMTP_FROM == "" || BASE_URL == "" {
+	if config.SMTP_HOST == "" || config.SMTP_FROM == "" || config.BASE_URL == "" {
 		log.Printf("[email] SMTP not configured, skipping reset email for %s", toEmail)
 		return
 	}
@@ -95,14 +96,14 @@ func sendResetEmail(toEmail string, username Username, token string) {
 			"<p>\"%s\"</p>"+
 			"<p style=\"color:#777;font-size:13px;margin-top:16px;\">This link expires in 1 hour. If you did not request a reset, ignore this email.</p>"+
 			"</div>",
-		SMTP_FROM, toEmail, subject, username, resetURL, resetURL,
+		config.SMTP_FROM, toEmail, subject, username, resetURL, resetURL,
 	)
 	var auth smtp.Auth
-	if SMTP_USER != "" && SMTP_PASS != "" {
-		auth = smtp.PlainAuth("", SMTP_USER, SMTP_PASS, SMTP_HOST)
+	if config.SMTP_USER != "" && config.SMTP_PASS != "" {
+		auth = smtp.PlainAuth("", config.SMTP_USER, config.SMTP_PASS, config.SMTP_HOST)
 	}
-	addr := SMTP_HOST + ":" + SMTP_PORT
-	if err := smtp.SendMail(addr, auth, SMTP_FROM, []string{toEmail}, []byte(body)); err != nil {
+	addr := config.SMTP_HOST + ":" + config.SMTP_PORT
+	if err := smtp.SendMail(addr, auth, config.SMTP_FROM, []string{toEmail}, []byte(body)); err != nil {
 		log.Printf("[email] failed to send reset to %s: %v", toEmail, err)
 	}
 }
@@ -112,18 +113,14 @@ func verifyEmailHandler(c *gin.Context) {
 	if !requireField(c, token, "token is required") {
 		return
 	}
-	// Hold the User value (a map), not a pointer into the users slice: slice
-	// slots can be swapped by concurrent deletes once the lock is released.
-	usersMutex.RLock()
+	idToUserMutex.RLock()
+	foundId, ok := verifyTokenToId[token]
+	idToUserMutex.RUnlock()
 	var foundUser User
-	for i := range users {
-		if users[i].GetString("sys.email_verify_token") == token {
-			foundUser = users[i]
-			break
-		}
+	if ok {
+		foundUser = getUserById(foundId)
 	}
-	usersMutex.RUnlock()
-	if foundUser == nil {
+	if foundUser == nil || foundUser.GetString("sys.email_verify_token") != token {
 		c.JSON(400, gin.H{"error": "Invalid or expired verification token"})
 		return
 	}
@@ -234,15 +231,14 @@ func requestPasswordResetHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "A valid email address is required"})
 		return
 	}
+	emailLower := strings.ToLower(strings.TrimSpace(email))
+	idToUserMutex.RLock()
+	foundId, ok := emailToId[emailLower]
+	idToUserMutex.RUnlock()
 	var foundUser User
-	usersMutex.RLock()
-	for i := range users {
-		if strings.EqualFold(strings.TrimSpace(users[i].GetEmail()), email) {
-			foundUser = users[i]
-			break
-		}
+	if ok {
+		foundUser = getUserById(foundId)
 	}
-	usersMutex.RUnlock()
 	if foundUser == nil {
 		c.JSON(200, gin.H{"message": "If an account with that email exists, a reset link has been sent"})
 		return
@@ -279,16 +275,14 @@ func resetPasswordHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": msg})
 		return
 	}
-	usersMutex.RLock()
+	idToUserMutex.RLock()
+	foundId, ok := resetTokenToId[token]
+	idToUserMutex.RUnlock()
 	var foundUser User
-	for i := range users {
-		if users[i].GetString("sys.reset_token") == token {
-			foundUser = users[i]
-			break
-		}
+	if ok {
+		foundUser = getUserById(foundId)
 	}
-	usersMutex.RUnlock()
-	if foundUser == nil {
+	if foundUser == nil || foundUser.GetString("sys.reset_token") != token {
 		c.JSON(400, gin.H{"error": "Invalid or expired reset token"})
 		return
 	}

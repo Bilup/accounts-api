@@ -31,7 +31,7 @@ func transferItem(c *gin.Context) {
 	if !requireField(c, targetUsername, "Target username is required") {
 		return
 	}
-	targetId := targetUsername.Id()
+	targetId := getIdByUsername(targetUsername)
 
 	// Check if target user exists
 	if !accountExists(targetId) {
@@ -397,7 +397,7 @@ func deleteItem(c *gin.Context) {
 }
 
 func listItems(c *gin.Context) {
-	username := Username(c.Param("username")).Id()
+	username := getIdByUsername(Username(c.Param("username")))
 
 	itemsMutex.RLock()
 	defer itemsMutex.RUnlock()
@@ -532,7 +532,7 @@ func adminAddUserToItem(c *gin.Context) {
 	if !requireField(c, username, "Username is required") {
 		return
 	}
-	userId := username.Id()
+	userId := getIdByUsername(username)
 
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()

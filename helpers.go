@@ -123,8 +123,8 @@ func queryLimit(c *gin.Context, def, max int) int {
 
 func getStringSlice(u User, key string) []string {
 	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 	if v, ok := u[key]; ok {
 		switch s := v.(type) {
 		case []string:

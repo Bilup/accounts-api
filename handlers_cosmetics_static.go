@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,7 @@ func serveOverlayAsset(c *gin.Context) {
 		return
 	}
 
-	base, _ := filepath.Abs(filepath.Join(COSMETICS_ASSETS_PATH, "overlays"))
+	base, _ := filepath.Abs(filepath.Join(config.COSMETICS_ASSETS_PATH, "overlays"))
 	targetPath := filepath.Join(base, cleaned)
 	resolved, err := filepath.Abs(targetPath)
 	if err != nil {

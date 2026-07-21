@@ -700,7 +700,7 @@ func requestToJoinGroup(c *gin.Context) {
 				continue
 			}
 			if hasPermission(member.UserId, groupTag, "groups.members.invite") || member.UserId == group.OwnerUserId {
-				notifyGroupMember(member.UserId.User(), user, groupTag, "Join Request", fmt.Sprintf("%s requested to join %s", user.GetUsername(), group.Name))
+				notifyGroupMember(getUserById(member.UserId), user, groupTag, "Join Request", fmt.Sprintf("%s requested to join %s", user.GetUsername(), group.Name))
 			}
 		}
 	}()

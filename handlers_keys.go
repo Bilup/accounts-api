@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -61,7 +62,7 @@ func createKey(c *gin.Context) {
 	defer keysMutex.Unlock()
 
 	// Check if key name already exists
-	userId := user.GetUsername().Id()
+	userId := getIdByUsername(user.GetUsername())
 	total_keys := 0
 	for _, key := range keys {
 		if key.Creator == userId {
@@ -144,7 +145,7 @@ func getMyKeys(c *gin.Context) {
 
 func checkKey(c *gin.Context) {
 	username := Username(c.Param("username"))
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	keyToCheck := c.Query("key")
 
 	if !requireField(c, keyToCheck, "Key is required") {
@@ -164,7 +165,7 @@ func revokeKey(c *gin.Context) {
 	id := c.Param("id")
 	user := currentUser(c)
 
-	targetId := Username(c.Query("user")).Id()
+	targetId := getIdByUsername(Username(c.Query("user")))
 	if !accountExists(targetId) {
 		c.JSON(400, gin.H{"error": "Target user not found"})
 		return
@@ -326,7 +327,7 @@ func adminAddUserToKey(c *gin.Context) {
 		c.JSON(400, ErrorResponse{Error: "Target user is required"})
 		return
 	}
-	targetId := targetUser.Id()
+	targetId := getIdByUsername(targetUser)
 	if !accountExists(targetId) {
 		c.JSON(400, ErrorResponse{Error: "Target user not found"})
 		return
@@ -367,7 +368,7 @@ func adminRemoveUserFromKey(c *gin.Context) {
 		c.JSON(400, ErrorResponse{Error: "Target user is required"})
 		return
 	}
-	targetId := targetUser.Id()
+	targetId := getIdByUsername(targetUser)
 	if !accountExists(targetId) {
 		c.JSON(400, ErrorResponse{Error: "Target user not found"})
 		return
@@ -593,7 +594,7 @@ func computeNextBilling(subscription *Subscription) time.Time {
 }
 
 func checkSubscriptions() {
-	ticker := time.NewTicker(time.Duration(SUBSCRIPTION_CHECK_INTERVAL) * time.Second)
+	ticker := time.NewTicker(time.Duration(config.SUBSCRIPTION_CHECK_INTERVAL) * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -660,7 +661,7 @@ func checkSubscriptions() {
 					}
 				}
 
-				username := userId.User().GetUsername()
+				username := getUserById(userId).GetUsername()
 
 				if userData.NextBilling == nil {
 					log.Printf("Warning: Invalid NextBilling type for user %s in key %s", username, snap.Key.Key)
@@ -728,7 +729,7 @@ func checkSubscriptions() {
 						newBal := snap.Owner.GetCredits() + value
 						snap.Owner.applyTransaction(newBal, Transaction{
 							Note:      "key purchase",
-							User:      username.Id(),
+							User:      getIdByUsername(username),
 							Amount:    value,
 							Type:      "key_sale",
 							Timestamp: time.Now().UnixMilli(),

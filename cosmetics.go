@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"fmt"
 	"log"
 	"math"
@@ -76,7 +77,7 @@ func (e CosmeticCatalogEntry) ToPublic() CosmeticCatalogEntryPublic {
 		ImageUrl:     e.ImageUrl,
 		PricingType:  e.PricingType,
 		Price:        e.Price,
-		Creator:      e.CreatorId.User().GetUsername(),
+		Creator:      getUserById(e.CreatorId).GetUsername(),
 		CreatorPct:   e.CreatorPct,
 		Featured:     e.Featured,
 		Purchases:    e.Purchases,
@@ -149,14 +150,14 @@ func validateCosmeticType(ct CosmeticType) bool {
 func loadCosmeticsCatalog() {
 	cosmeticsCatalogMu.Lock()
 	defer cosmeticsCatalogMu.Unlock()
-	cosmeticsCatalog = loadJSONOrDefault(COSMETICS_FILE_PATH, []CosmeticCatalogEntry{})
+	cosmeticsCatalog = loadJSONOrDefault(config.COSMETICS_FILE_PATH, []CosmeticCatalogEntry{})
 	log.Printf("Loaded %d cosmetics catalog entries", len(cosmeticsCatalog))
 }
 
 func saveCosmeticsCatalog() {
 	cosmeticsCatalogMu.RLock()
 	defer cosmeticsCatalogMu.RUnlock()
-	saveJsonFile(COSMETICS_FILE_PATH, cosmeticsCatalog)
+	saveJsonFile(config.COSMETICS_FILE_PATH, cosmeticsCatalog)
 }
 
 func loadUserCosmetics(userId UserId) (*UserCosmetics, error) {
@@ -686,7 +687,7 @@ func adminCreateCosmetic(c *gin.Context) {
 		return
 	}
 
-	creatorId := Username(req.Creator).Id()
+	creatorId := getIdByUsername(Username(req.Creator))
 	if creatorId == "" {
 		c.JSON(404, gin.H{"error": "Creator user not found"})
 		return
@@ -809,7 +810,7 @@ func adminUpdateCosmetic(c *gin.Context) {
 	}
 	if req.Creator != nil {
 		creatorName := strings.TrimSpace(*req.Creator)
-		creatorId := Username(creatorName).Id()
+		creatorId := getIdByUsername(Username(creatorName))
 		if creatorId == "" {
 			cosmeticsCatalogMu.Unlock()
 			c.JSON(404, gin.H{"error": "Creator user not found"})

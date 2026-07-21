@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"claw/internal/config"
 	"encoding/json"
 	"log"
 	"maps"
@@ -147,7 +148,7 @@ func sendPostToDiscord(postData NetPost) {
 		"content":    postData.Content,
 	}
 
-	success := makeHTTPRequest("POST", DISCORD_WEBHOOK_URL, webhookData, 5*time.Second, "Discord", 204)
+	success := makeHTTPRequest("POST", config.DISCORD_WEBHOOK_URL, webhookData, 5*time.Second, "Discord", 204)
 	if success {
 		log.Printf("[Discord] Post %s sent to Discord successfully", postData.ID)
 	}
@@ -160,7 +161,7 @@ func sendReportToDiscord(reportData string) {
 		"content":    "<@603952506330021898> Reported: " + reportData,
 	}
 
-	success := makeHTTPRequest("POST", DISCORD_WEBHOOK_URL, webhookData, 5*time.Second, "Discord", 204)
+	success := makeHTTPRequest("POST", config.DISCORD_WEBHOOK_URL, webhookData, 5*time.Second, "Discord", 204)
 	if success {
 		log.Printf("[Discord] Report sent to Discord successfully")
 	}
@@ -168,7 +169,7 @@ func sendReportToDiscord(reportData string) {
 
 func notify(eventType string, data any) bool {
 	payload := createEventPayload(eventType, data)
-	success := makeHTTPRequest("POST", EVENT_SERVER_URL, payload, 5*time.Second, "Event", 200)
+	success := makeHTTPRequest("POST", config.EVENT_SERVER_URL, payload, 5*time.Second, "Event", 200)
 	if success {
 		log.Printf("[Event] Event %s sent to Event server successfully", eventType)
 	}
@@ -184,7 +185,7 @@ func notifyAccountDeleted(id UserId, ts int64) bool {
 		"ts":  ts,
 		"sig": signAccountDeletion(id, ts),
 	})
-	return makeHTTPRequest("POST", EVENT_SERVER_URL, payload, 5*time.Second, "AccountDeleted", 200)
+	return makeHTTPRequest("POST", config.EVENT_SERVER_URL, payload, 5*time.Second, "AccountDeleted", 200)
 }
 
 func broadcastUserUpdate(username Username, key string, value any) bool {
@@ -195,7 +196,7 @@ func broadcastUserUpdate(username Username, key string, value any) bool {
 		"rotur":    username,
 	})
 
-	success := makeHTTPRequest("POST", EVENT_SERVER_URL, payload, 2*time.Second, "UserUpdate", 200)
+	success := makeHTTPRequest("POST", config.EVENT_SERVER_URL, payload, 2*time.Second, "UserUpdate", 200)
 	return success
 }
 

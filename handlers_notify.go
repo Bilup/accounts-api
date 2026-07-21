@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -58,7 +59,7 @@ var (
 )
 
 func loadOrGenerateVAPIDKeys() {
-	keyPath := mustEnv("VAPID_KEY_PATH", "./vapid_keys.json")
+	keyPath := config.MustEnv("VAPID_KEY_PATH", "./vapid_keys.json")
 
 	data, err := os.ReadFile(keyPath)
 	if err == nil {
@@ -447,7 +448,7 @@ func getNotifyAllowedSenders(c *gin.Context) {
 		senders := make([]SenderInfo, 0, len(senderMap))
 		for userId, entry := range senderMap {
 			senders = append(senders, SenderInfo{
-				Username: userId.User().GetUsername(),
+				Username: getUserById(userId).GetUsername(),
 				Count:    entry.Count,
 			})
 		}
@@ -474,7 +475,7 @@ func addNotifyAllowedSender(c *gin.Context) {
 		return
 	}
 
-	targetId := targetUsername.Id()
+	targetId := getIdByUsername(targetUsername)
 	if targetId == "" {
 		c.JSON(404, gin.H{"error": "user not found"})
 		return
@@ -496,7 +497,7 @@ func removeNotifyAllowedSender(c *gin.Context) {
 		return
 	}
 
-	targetId := targetUsername.Id()
+	targetId := getIdByUsername(targetUsername)
 	if targetId == "" {
 		c.JSON(404, gin.H{"error": "user not found"})
 		return

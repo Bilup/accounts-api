@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"claw/internal/config"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -15,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"claw/internal/imageutil"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -777,7 +780,7 @@ func getGroupMembersList(c *gin.Context) {
 				filteredMembers = append(filteredMembers, m)
 				continue
 			}
-			username := strings.ToLower(string(m.UserId.User().GetUsername()))
+			username := strings.ToLower(string(getUserById(m.UserId).GetUsername()))
 			if strings.Contains(username, searchQuery) {
 				filteredMembers = append(filteredMembers, m)
 			}
@@ -907,7 +910,7 @@ func uploadGroupIcon(c *gin.Context) {
 	// Update icon URL
 	groupsDataMutex.Lock()
 	data := groupsData[groupTag]
-	data.Group.IconUrl = BASE_URL + "/groups/" + groupTag + "/icon.jpg"
+	data.Group.IconUrl = config.BASE_URL + "/groups/" + groupTag + "/icon.jpg"
 	groupsData[groupTag] = data
 	groupsDataMutex.Unlock()
 	go saveGroupData(groupTag)
@@ -976,7 +979,7 @@ func uploadGroupBanner(c *gin.Context) {
 	}
 
 	if ext == ".gif" {
-		resizedData, err := resizeGIF(imageData, 900, 300)
+		resizedData, err := imageutil.ResizeGIF(imageData, 900, 300)
 		if err != nil {
 			c.JSON(400, gin.H{"error": "Invalid GIF image"})
 			return
@@ -1015,7 +1018,7 @@ func uploadGroupBanner(c *gin.Context) {
 
 	groupsDataMutex.Lock()
 	data := groupsData[groupTag]
-	data.Group.BannerUrl = BASE_URL + "/groups/" + groupTag + "/banner"
+	data.Group.BannerUrl = config.BASE_URL + "/groups/" + groupTag + "/banner"
 	groupsData[groupTag] = data
 	groupsDataMutex.Unlock()
 	go saveGroupData(groupTag)

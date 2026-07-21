@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,7 +9,7 @@ import (
 )
 
 func getUserDataDir(userId UserId) string {
-	return filepath.Join(USERDATA_PATH, string(userId))
+	return filepath.Join(config.USERDATA_PATH, string(userId))
 }
 
 func getUserDataFile(userId UserId, filename string) string {

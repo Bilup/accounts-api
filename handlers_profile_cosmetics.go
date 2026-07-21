@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"fmt"
 	"net/http"
 	"strings"
@@ -21,7 +22,7 @@ func (e CosmeticCatalogEntry) ToProfile() ProfileCosmeticEntry {
 }
 
 func buildCosmeticRawUrl(ct CosmeticType, id string) string {
-	base := strings.TrimRight(BASE_URL, "/")
+	base := strings.TrimRight(config.BASE_URL, "/")
 	switch ct {
 	case CosmeticTypeOverlay:
 		return fmt.Sprintf("%s/cosmetics/overlays/%s.gif", base, id)

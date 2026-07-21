@@ -14,7 +14,7 @@ func (w GroupTipWithdrawal) ToNet() GroupTipWithdrawalNet {
 	return GroupTipWithdrawalNet{
 		Id:            w.Id,
 		GroupTag:      w.GroupTag,
-		ToUsername:    w.ToUserId.User().GetUsername(),
+		ToUsername:    getUserById(w.ToUserId).GetUsername(),
 		AmountCredits: w.AmountCredits,
 		CreatedAt:     w.CreatedAt,
 	}
@@ -36,9 +36,9 @@ func (i GroupInvite) ToNet() GroupInviteNet {
 		Id:           i.Id,
 		GroupTag:     i.GroupTag,
 		FromUserId:   i.FromUserId,
-		FromUsername: i.FromUserId.User().GetUsername(),
+		FromUsername: getUserById(i.FromUserId).GetUsername(),
 		ToUserId:     i.ToUserId,
-		ToUsername:   i.ToUserId.User().GetUsername(),
+		ToUsername:   getUserById(i.ToUserId).GetUsername(),
 		Status:       i.Status,
 		CreatedAt:    i.CreatedAt,
 	}
@@ -59,7 +59,7 @@ func (r GroupJoinRequest) ToNet() GroupJoinRequestNet {
 		Id:        r.Id,
 		GroupTag:  r.GroupTag,
 		UserId:    r.UserId,
-		Username:  r.UserId.User().GetUsername(),
+		Username:  getUserById(r.UserId).GetUsername(),
 		Message:   r.Message,
 		Status:    r.Status,
 		CreatedAt: r.CreatedAt,
@@ -82,9 +82,9 @@ func (b GroupBan) ToNet() GroupBanNet {
 		Id:           b.Id,
 		GroupTag:     b.GroupTag,
 		UserId:       b.UserId,
-		Username:     b.UserId.User().GetUsername(),
+		Username:     getUserById(b.UserId).GetUsername(),
 		BannedById:   b.BannedBy,
-		BannedByUser: b.BannedBy.User().GetUsername(),
+		BannedByUser: getUserById(b.BannedBy).GetUsername(),
 		Reason:       b.Reason,
 		CreatedAt:    b.CreatedAt,
 	}
@@ -105,7 +105,7 @@ func (m GroupMember) ToNet() GroupMemberNet {
 		Id:                 m.Id,
 		GroupTag:           m.GroupTag,
 		UserId:             m.UserId,
-		Username:           m.UserId.User().GetUsername(),
+		Username:           getUserById(m.UserId).GetUsername(),
 		RoleIds:            m.RoleIds,
 		JoinedAt:           m.JoinedAt,
 		MutedAnnouncements: m.MutedAnnouncements,
@@ -128,7 +128,7 @@ func (a GroupAnnouncement) ToNet() GroupAnnouncementNet {
 		GroupTag:       a.GroupTag,
 		Title:          a.Title,
 		Body:           a.Body,
-		AuthorUsername: a.AuthorUserId.User().GetUsername(),
+		AuthorUsername: getUserById(a.AuthorUserId).GetUsername(),
 		CreatedAt:      a.CreatedAt,
 		PingMembers:    a.PingMembers,
 	}
@@ -157,7 +157,7 @@ func (e GroupEvent) ToNet() GroupEventNet {
 		EndTime:     e.EndTime,
 		Location:    e.Location,
 		Visibility:  e.Visibility,
-		CreatedBy:   e.CreatedBy.User().GetUsername(),
+		CreatedBy:   getUserById(e.CreatedBy).GetUsername(),
 		Published:   e.Published,
 	}
 }
@@ -175,7 +175,7 @@ func (t GroupTip) ToNet() GroupTipNet {
 	return GroupTipNet{
 		Id:            t.Id,
 		GroupTag:      t.GroupTag,
-		FromUsername:  t.FromUserId.User().GetUsername(),
+		FromUsername:  getUserById(t.FromUserId).GetUsername(),
 		AmountCredits: t.AmountCredits,
 		Note:          t.Note,
 		CreatedAt:     t.CreatedAt,
@@ -254,7 +254,7 @@ func (s GroupProductSubscription) ToNet() GroupProductSubscriptionNet {
 		GroupTag:    s.GroupTag,
 		ProductId:   s.ProductId,
 		ProductName: productName,
-		Username:    s.UserId.User().GetUsername(),
+		Username:    getUserById(s.UserId).GetUsername(),
 		RoleId:      s.RoleId,
 		RoleName:    roleName,
 		StartedAt:   s.StartedAt,

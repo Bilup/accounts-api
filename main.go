@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"fmt"
 	"log"
 	"os"
@@ -15,7 +16,7 @@ func main() {
 	// Ensure environment variables are loaded before any handlers/config usage
 	envOnce.Do(loadEnvFile)
 	// (Re)load config in case env was changed externally
-	loadConfigFromEnv()
+	config.Load()
 
 	// Load initial data
 	loadBannedWords()
@@ -44,7 +45,7 @@ func main() {
 
 	go cleanRateLimitStorage()
 	go checkSubscriptions()
-	go watchUsersFile()
+	go watchUserIndexes()
 	go watchBadgesFile()
 	go cleanExpiredGifts()
 	go cleanExpiredSubTokens()

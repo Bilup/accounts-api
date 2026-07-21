@@ -1,4 +1,4 @@
-package main
+package captcha
 
 import (
 	"encoding/json"
@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-func verifyHCaptcha(token string) bool {
+func VerifyHCaptcha(token string) bool {
 	secret := os.Getenv("HCAPTCHA_SECRET")
 	if secret == "" {
 		log.Println("⚠️ HCAPTCHA_SECRET not set in environment")

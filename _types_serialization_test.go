@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-
 func TestReply_UnmarshalJSON_FloatTimestamp(t *testing.T) {
 	data := `{"id":"r1","content":"hello","user":"user1","timestamp":1700000000000}`
 	var r Reply
@@ -38,7 +37,6 @@ func TestReply_UnmarshalJSON_StringTimestamp(t *testing.T) {
 	}
 }
 
-
 func TestPost_UnmarshalJSON_FloatTimestamp(t *testing.T) {
 	ts := time.Now().UnixMilli()
 	data := `{"id":"p1","content":"test post","user":"user1","timestamp":` + jsonInt(ts) + `}`
@@ -65,7 +63,6 @@ func TestPost_UnmarshalJSON_StringTimestamp(t *testing.T) {
 		t.Errorf("Timestamp = %d, want %d", p.Timestamp, ts)
 	}
 }
-
 
 func TestPost_ToNet(t *testing.T) {
 	p := Post{
@@ -104,7 +101,6 @@ func TestReply_ToNet(t *testing.T) {
 	}
 }
 
-
 func TestTransaction_ToNet(t *testing.T) {
 	tx := Transaction{
 		Type:      "transfer",
@@ -128,20 +124,19 @@ func TestTransaction_ToNet(t *testing.T) {
 	}
 }
 
-
 func TestGift_ToNet(t *testing.T) {
 	claimedAt := time.Now().UnixMilli()
 	claimedBy := UserId("user1")
 	g := Gift{
-		Id:         "gift1",
-		Code:       "abc123",
-		Amount:     100.0,
-		Note:       "test gift",
-		CreatorId:  UserId("creator1"),
-		CreatedAt:  1700000000000,
-		ExpiresAt:  1700100000000,
-		ClaimedAt:  &claimedAt,
-		ClaimedBy:  &claimedBy,
+		Id:        "gift1",
+		Code:      "abc123",
+		Amount:    100.0,
+		Note:      "test gift",
+		CreatorId: UserId("creator1"),
+		CreatedAt: 1700000000000,
+		ExpiresAt: 1700100000000,
+		ClaimedAt: &claimedAt,
+		ClaimedBy: &claimedBy,
 	}
 	net := g.ToNet()
 	if net.Id != "gift1" {
@@ -169,11 +164,10 @@ func TestGift_ToPublic(t *testing.T) {
 	}
 }
 
-
 func TestKey_ToPublic(t *testing.T) {
 	k := &Key{
-		Key:  "testkey",
-		Name: "My Key",
+		Key:   "testkey",
+		Name:  "My Key",
 		Price: 10,
 		Type:  "one_time",
 	}
@@ -239,7 +233,6 @@ func TestKey_setKey_Data(t *testing.T) {
 	}
 }
 
-
 func TestSystem_Set_Name(t *testing.T) {
 	s := &System{Name: "old"}
 	val, err := s.Set("name", "new")
@@ -292,17 +285,16 @@ func TestSystem_Set_InvalidValueType(t *testing.T) {
 	}
 }
 
-
 func TestGroup_ToNet(t *testing.T) {
 	g := Group{
-		Id:            GroupId("g1"),
-		Tag:           "testgroup",
-		Name:          "Test Group",
-		Description:   "A test group",
-		OwnerUserId:   UserId("owner1"),
-		Public:        true,
-		JoinPolicy:    JoinPolicyOpen,
-		CreatedAt:     1700000000000,
+		Id:             GroupId("g1"),
+		Tag:            "testgroup",
+		Name:           "Test Group",
+		Description:    "A test group",
+		OwnerUserId:    UserId("owner1"),
+		Public:         true,
+		JoinPolicy:     JoinPolicyOpen,
+		CreatedAt:      1700000000000,
 		CreditsBalance: 100.0,
 	}
 	net := g.ToNet()
@@ -320,7 +312,6 @@ func TestGroup_ToNet(t *testing.T) {
 	}
 }
 
-
 func TestGroup_ToPublic(t *testing.T) {
 	g := &Group{
 		Tag:        "tag1",
@@ -336,7 +327,6 @@ func TestGroup_ToPublic(t *testing.T) {
 		t.Errorf("GroupPublic.JoinPolicy = %q, want %q", pub.JoinPolicy, JoinPolicyRequest)
 	}
 }
-
 
 func TestItem_ToNet(t *testing.T) {
 	i := Item{
@@ -360,7 +350,6 @@ func TestItem_ToNet(t *testing.T) {
 		t.Error("NetItem.Selling should be true")
 	}
 }
-
 
 func jsonInt(v int64) string {
 	return string(must(json.Marshal(v)))

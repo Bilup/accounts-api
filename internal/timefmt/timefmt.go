@@ -1,4 +1,4 @@
-package main
+package timefmt
 
 import (
 	"regexp"
@@ -8,7 +8,7 @@ import (
 
 var utcOffsetRe = regexp.MustCompile(`^UTC([+-])(\d{1,2})$`)
 
-func parseUTCOffsetHours(tz string) (int, bool) {
+func ParseUTCOffsetHours(tz string) (int, bool) {
 	tz = strings.TrimSpace(tz)
 	tz = strings.ToUpper(tz)
 	match := utcOffsetRe.FindStringSubmatch(tz)
@@ -21,7 +21,6 @@ func parseUTCOffsetHours(tz string) (int, bool) {
 		return 0, false
 	}
 	if hours > 14 {
-		// keep this sane; real-world offsets are within roughly [-12, +14]
 		return 0, false
 	}
 
@@ -31,7 +30,7 @@ func parseUTCOffsetHours(tz string) (int, bool) {
 	return hours, true
 }
 
-func normalizeUserTimeLayout(layout string) string {
+func NormalizeUserTimeLayout(layout string) string {
 	layout = strings.TrimSpace(layout)
 	if layout == "" {
 		return ""

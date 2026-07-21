@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -16,11 +17,11 @@ func TestSaveAndLoadUserJSON(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	origPath := USERDATA_PATH
-	USERDATA_PATH = tmpDir
-	defer func() { USERDATA_PATH = origPath }()
+	origPath := config.USERDATA_PATH
+	config.USERDATA_PATH = tmpDir
+	defer func() { config.USERDATA_PATH = origPath }()
 
-	// Setup a minimal idToUser mapping so Username.Id() works
+	// Setup a minimal idToUser mapping so getIdByUsername(Username) works
 	idToUserMutex.Lock()
 	if usernameToId == nil {
 		usernameToId = make(map[Username]UserId)
@@ -44,7 +45,7 @@ func TestSaveAndLoadUserJSON(t *testing.T) {
 	}
 
 	username := Username("jsontestuser")
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	orig := TestStruct{Name: "test", Value: 42}
 
 	err = SaveUserJSON(userId, "test_data.json", orig)
@@ -69,9 +70,9 @@ func TestLoadUserJSON_NotExists(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	origPath := USERDATA_PATH
-	USERDATA_PATH = tmpDir
-	defer func() { USERDATA_PATH = origPath }()
+	origPath := config.USERDATA_PATH
+	config.USERDATA_PATH = tmpDir
+	defer func() { config.USERDATA_PATH = origPath }()
 
 	idToUserMutex.Lock()
 	if usernameToId == nil {
@@ -103,9 +104,9 @@ func TestSaveUserJSON_CreatesDirectory(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	origPath := USERDATA_PATH
-	USERDATA_PATH = filepath.Join(tmpDir, "deep", "nested")
-	defer func() { USERDATA_PATH = origPath }()
+	origPath := config.USERDATA_PATH
+	config.USERDATA_PATH = filepath.Join(tmpDir, "deep", "nested")
+	defer func() { config.USERDATA_PATH = origPath }()
 
 	idToUserMutex.Lock()
 	if usernameToId == nil {
@@ -129,7 +130,7 @@ func TestSaveUserJSON_CreatesDirectory(t *testing.T) {
 		t.Fatalf("SaveUserJSON should create nested dirs, got: %v", err)
 	}
 
-	dirPath := filepath.Join(USERDATA_PATH, "id_dirtestuser")
+	dirPath := filepath.Join(config.USERDATA_PATH, "id_dirtestuser")
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 		t.Errorf("Directory %s should exist", dirPath)
 	}

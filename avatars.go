@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"claw/internal/config"
 	"crypto/md5"
 	"encoding/base64"
 	"fmt"
@@ -19,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"claw/internal/imageutil"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nfnt/resize"
@@ -144,8 +147,8 @@ func loadAvatarConfig() {
 	if documentPath == "" {
 		documentPath = "/tmp"
 	}
-	avatarBaseDir = mustEnv("AVATAR_DIR", filepath.Join(documentPath, "Documents", "rotur", "avatars"))
-	bannerBaseDir = mustEnv("BANNER_DIR", filepath.Join(documentPath, "Documents", "rotur", "banners"))
+	avatarBaseDir = config.MustEnv("AVATAR_DIR", filepath.Join(documentPath, "Documents", "rotur", "avatars"))
+	bannerBaseDir = config.MustEnv("BANNER_DIR", filepath.Join(documentPath, "Documents", "rotur", "banners"))
 }
 
 func init() {
@@ -273,7 +276,7 @@ func avatarHandler(c *gin.Context) {
 	username := Username(usernameStr)
 
 	if len(usernameStr) == 36 {
-		user := UserId(usernameStr).User()
+		user := getUserById(UserId(usernameStr))
 		if user == nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
 			return
@@ -372,8 +375,8 @@ func avatarHandler(c *gin.Context) {
 	}
 
 	if srcIsGif && forceStill {
-		if img, err := decodeFirstGIFFrame(imageData); err == nil {
-			if encoded, err := encodePNG(img); err == nil {
+		if img, err := imageutil.DecodeFirstGIFFrame(imageData); err == nil {
+			if encoded, err := imageutil.EncodePNG(img); err == nil {
 				imageData = encoded
 				contentType = "image/png"
 			}
@@ -383,7 +386,7 @@ func avatarHandler(c *gin.Context) {
 	if contentType == "image/gif" {
 		if sizeStr != "" {
 			if sz, err := strconv.Atoi(sizeStr); err == nil && sz > 0 && sz <= 256 {
-				if resized, err := resizeGIF(imageData, sz, sz); err == nil {
+				if resized, err := imageutil.ResizeGIF(imageData, sz, sz); err == nil {
 					imageData = resized
 				}
 			}
@@ -395,7 +398,7 @@ func avatarHandler(c *gin.Context) {
 					radiusInt = 128
 				}
 				if src, err := gif.DecodeAll(bytes.NewReader(imageData)); err == nil {
-					if rounded, err := roundGIF(src, radiusInt); err == nil {
+					if rounded, err := imageutil.RoundGIF(src, radiusInt); err == nil {
 						buf := avatarBufPool.Get().(*bytes.Buffer)
 						buf.Reset()
 						defer avatarBufPool.Put(buf)
@@ -448,7 +451,7 @@ func avatarHandler(c *gin.Context) {
 				radiusInt = h / 2
 			}
 			result := image.NewRGBA(bounds)
-			mask := roundedRectMaskAA(w, h, radiusInt)
+			mask := imageutil.RoundedRectMaskAA(w, h, radiusInt)
 			draw.DrawMask(result, bounds, img, bounds.Min, mask, image.Point{}, draw.Over)
 			img = result
 			contentType = "image/png"
@@ -485,7 +488,7 @@ func overlayHandler(c *gin.Context) {
 	username := Username(usernameStr)
 
 	if len(usernameStr) == 36 {
-		user := UserId(usernameStr).User()
+		user := getUserById(UserId(usernameStr))
 		if user == nil {
 			sendEmpty(c)
 			return
@@ -502,7 +505,7 @@ func overlayHandler(c *gin.Context) {
 		return
 	}
 
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	if userId == "" {
 		sendEmpty(c)
 		return
@@ -513,7 +516,7 @@ func overlayHandler(c *gin.Context) {
 		return
 	}
 
-	path := filepath.Join(COSMETICS_ASSETS_PATH, "overlays", overlayName+".gif")
+	path := filepath.Join(config.COSMETICS_ASSETS_PATH, "overlays", overlayName+".gif")
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		sendEmpty(c)
@@ -637,7 +640,7 @@ func savePfp(dataURI string, user *User) error {
 	filePath := filepath.Join(avatarBaseDir, string(username))
 
 	if contentType == "image/gif" {
-		resizedData, err := resizeGIF(imageData, 256, 256)
+		resizedData, err := imageutil.ResizeGIF(imageData, 256, 256)
 		if err != nil {
 			return fmt.Errorf("error resizing GIF: %w", err)
 		}
@@ -755,7 +758,7 @@ func bannerHandler(c *gin.Context) {
 	username := Username(usernameStr)
 
 	if len(usernameStr) == 36 {
-		user := UserId(usernameStr).User()
+		user := getUserById(UserId(usernameStr))
 		if user == nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
 			return
@@ -818,12 +821,12 @@ func bannerHandler(c *gin.Context) {
 					return
 				}
 			}
-			img, err := decodeFirstGIFFrame(imageData)
+			img, err := imageutil.DecodeFirstGIFFrame(imageData)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding GIF"})
 				return
 			}
-			jpegData, err := encodeJPEG(img, 85)
+			jpegData, err := imageutil.EncodeJPEG(img, 85)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error encoding JPEG"})
 				return
@@ -862,12 +865,12 @@ func bannerHandler(c *gin.Context) {
 	}
 
 	if forceStill {
-		img, err := decodeFirstGIFFrame(imageData)
+		img, err := imageutil.DecodeFirstGIFFrame(imageData)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding GIF"})
 			return
 		}
-		imageData, err = encodeJPEG(img, 85)
+		imageData, err = imageutil.EncodeJPEG(img, 85)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error encoding JPEG"})
 			return
@@ -881,7 +884,7 @@ func bannerHandler(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding GIF"})
 			return
 		}
-		rounded, err := roundGIF(src, radiusInt)
+		rounded, err := imageutil.RoundGIF(src, radiusInt)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error rounding GIF"})
 			return
@@ -900,7 +903,7 @@ func bannerHandler(c *gin.Context) {
 		return
 	}
 
-	rounded, newContentType, err := roundCorners(imageData, radiusInt)
+	rounded, newContentType, err := imageutil.RoundCorners(imageData, radiusInt)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error rounding image"})
 		return
@@ -949,7 +952,7 @@ func saveBanner(dataURI string, user *User) error {
 	filePath := filepath.Join(bannerBaseDir, string(username))
 
 	if contentType == "image/gif" {
-		resizedData, err := resizeGIF(imageData, 900, 300)
+		resizedData, err := imageutil.ResizeGIF(imageData, 900, 300)
 		if err != nil {
 			return fmt.Errorf("error resizing GIF: %w", err)
 		}

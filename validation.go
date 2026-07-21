@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"claw/internal/pwhash"
 )
 
 var (
@@ -31,9 +34,9 @@ func loadBannedWordsLocal() ([]string, error) {
 			}
 		}
 
-		if BANNED_WORDS_URL != "" {
+		if config.BANNED_WORDS_URL != "" {
 			client := &http.Client{Timeout: 5 * time.Second}
-			resp, err := client.Get(BANNED_WORDS_URL)
+			resp, err := client.Get(config.BANNED_WORDS_URL)
 			if err == nil {
 				defer resp.Body.Close()
 				if resp.StatusCode == 200 {
@@ -96,7 +99,7 @@ func ValidatePassword(password string) (bool, string) {
 	if len(password) > 128 {
 		return false, "Password must be at most 128 characters"
 	}
-	if isMD5Hex(password) {
+	if pwhash.IsMD5Hex(password) {
 		return false, "Password looks like an MD5 hash - please use a real password"
 	}
 	return true, ""

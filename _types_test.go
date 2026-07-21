@@ -222,7 +222,7 @@ func TestUser_RemoveBlocked_NotBlocked(t *testing.T) {
 }
 
 func TestUser_Friends(t *testing.T) {
-	// We can't fully test AddFriend/RemoveFriend because they call username.Id()
+	// We can't fully test AddFriend/RemoveFriend because they call getIdByUsername(username)
 	// which requires the global idToUser map. Test what we can.
 	u := User{
 		"sys.friends": []string{"id1", "id2"},

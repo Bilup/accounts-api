@@ -1,13 +1,13 @@
 package main
 
 import (
+	"claw/internal/config"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -16,25 +16,13 @@ func loadUsers() {
 	usersMutex.Lock()
 	defer usersMutex.Unlock()
 
-	if _, err := os.Stat(USERS_FILE_PATH); os.IsNotExist(err) {
-		users = make([]User, 0)
-		return
-	}
+	loaded := readAllUserFiles()
 
-	data, err := os.ReadFile(USERS_FILE_PATH)
-	if err != nil {
-		log.Printf("Error reading users file (keeping in-memory users): %v", err)
-		return
+	if legacy, didMigrate := migrateLegacyUsersFile(); didMigrate && len(loaded) == 0 {
+		loaded = legacy
 	}
-	if len(data) == 0 {
-		log.Printf("users.json read returned 0 bytes; preserving existing in-memory users (%d)", len(users))
-		return
-	}
-
-	var loaded []User
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		log.Printf("Error unmarshaling users (keeping existing %d users): %v", len(users), err)
-		return
+	if loaded == nil {
+		loaded = make([]User, 0)
 	}
 
 	migratedCount := 0
@@ -48,57 +36,22 @@ func loadUsers() {
 		log.Printf("Migrated %d users to standing system", migratedCount)
 	}
 
-	usernameToIdInner := make(map[Username]UserId, len(loaded))
-	idToUserInner := make(map[UserId]User, len(loaded))
-	keyToUserIdxInner := make(map[string]int, len(loaded))
-	for i, u := range loaded {
-		id := u.GetId()
-		usernameToIdInner[u.GetUsername().ToLower()] = id
-		idToUserInner[id] = u
-		if key := u.GetKey(); key != "" {
-			keyToUserIdxInner[key] = i
-		}
-	}
-	fmt.Println("Loaded", len(loaded), "users")
-	// Pre-populate avatar tier cache
-	tierCache := make(map[Username]string, len(loaded))
-	for _, u := range loaded {
-		tier := "Free"
-		if sub := u.Get("sys.subscription"); sub != nil {
-			if m, ok := sub.(map[string]any); ok {
-				if t, ok := m["tier"]; ok {
-					if s, ok := t.(string); ok && s != "" {
-						tier = normalizeSubscriptionTier(s)
-					}
-				}
-			}
-		}
-		tierCache[u.GetUsername().ToLower()] = tier
-	}
-	userTierCacheMu.Lock()
-	userTierCache = tierCache
-	userTierCacheMu.Unlock()
-
-	idToUserMutex.Lock()
-	usernameToId = usernameToIdInner
-	idToUser = idToUserInner
-	keyToUserIdx = keyToUserIdxInner
-	idToUserMutex.Unlock()
-	clearOverlayCosmeticsCache()
 	users = loaded
+	fmt.Println("Loaded", len(loaded), "users")
 
-	// Every reload allocates fresh User maps; drop mutexes keyed to the old
-	// map pointers so the registry doesn't grow forever.
+	rebuildUserIndexesLocked()
+	clearOverlayCosmeticsCache()
+
 	userMutexesLock.Lock()
-	userPtrMutexes = make(map[uintptr]*sync.Mutex, len(loaded))
+	userPtrMutexes = make(map[uintptr]*sync.RWMutex, len(loaded))
 	userMutexesLock.Unlock()
 }
 
 func loadGroupData() {
 	groupsDataMutex.Lock()
 	defer groupsDataMutex.Unlock()
-	if _, err := os.Stat(GROUPS_FILE_PATH); os.IsNotExist(err) {
-		err = os.MkdirAll(GROUPS_FILE_PATH, 0755)
+	if _, err := os.Stat(config.GROUPS_FILE_PATH); os.IsNotExist(err) {
+		err = os.MkdirAll(config.GROUPS_FILE_PATH, 0755)
 		if err != nil {
 			log.Printf("Error creating groups directory: %v", err)
 			groupsData = make(map[string]*GroupData)
@@ -107,7 +60,7 @@ func loadGroupData() {
 		groupsData = make(map[string]*GroupData)
 		return
 	}
-	entries, err := os.ReadDir(GROUPS_FILE_PATH)
+	entries, err := os.ReadDir(config.GROUPS_FILE_PATH)
 	if err != nil {
 		log.Printf("Error reading groups directory: %v", err)
 		groupsData = make(map[string]*GroupData)
@@ -119,7 +72,7 @@ func loadGroupData() {
 		if !entry.IsDir() {
 			continue
 		}
-		groupJsonPath := filepath.Join(GROUPS_FILE_PATH, entry.Name(), "group.json")
+		groupJsonPath := filepath.Join(config.GROUPS_FILE_PATH, entry.Name(), "group.json")
 		data, err := os.ReadFile(groupJsonPath)
 		if err != nil {
 			log.Printf("Error reading group file %s: %v", groupJsonPath, err)
@@ -131,7 +84,7 @@ func loadGroupData() {
 			continue
 		}
 		// Load tips from separate file and compute credits balance
-		tipsPath := filepath.Join(GROUPS_FILE_PATH, entry.Name(), "tips.json")
+		tipsPath := filepath.Join(config.GROUPS_FILE_PATH, entry.Name(), "tips.json")
 		tipsData, err := os.ReadFile(tipsPath)
 		if err == nil {
 			var tips []GroupTip
@@ -140,7 +93,7 @@ func loadGroupData() {
 				for _, tip := range tips {
 					balance += tip.AmountCredits
 				}
-				withdrawalsPath := filepath.Join(GROUPS_FILE_PATH, entry.Name(), "withdrawals.json")
+				withdrawalsPath := filepath.Join(config.GROUPS_FILE_PATH, entry.Name(), "withdrawals.json")
 				if withdrawalsData, wErr := os.ReadFile(withdrawalsPath); wErr == nil {
 					var withdrawals []GroupTipWithdrawal
 					if json.Unmarshal(withdrawalsData, &withdrawals) == nil {
@@ -233,56 +186,26 @@ func atomicWrite(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
-var (
-	usersSaveMutex sync.Mutex
-	usersDirty     int32
-	saveScheduled  int32
-)
-
 func saveUsers() {
-	atomic.StoreInt32(&usersDirty, 1)
+	flushDirtyUsers()
+}
 
-	if !atomic.CompareAndSwapInt32(&saveScheduled, 0, 1) {
+func flushDirtyUsers() {
+	dirtyUsersMu.Lock()
+	if len(dirtyUsers) == 0 {
+		dirtyUsersMu.Unlock()
 		return
 	}
+	batch := make([]UserId, 0, len(dirtyUsers))
+	for id := range dirtyUsers {
+		batch = append(batch, id)
+	}
+	dirtyUsers = make(map[UserId]struct{})
+	dirtyUsersMu.Unlock()
 
-	go func() {
-		for {
-			time.Sleep(100 * time.Millisecond)
-
-			usersSaveMutex.Lock()
-
-			usersMutex.RLock()
-			snapshot := make([]User, len(users))
-			for i := range users {
-				snapshot[i] = copyUser(users[i])
-			}
-			usersMutex.RUnlock()
-
-			atomic.StoreInt32(&usersDirty, 0)
-
-			data, err := json.Marshal(snapshot)
-			if err != nil {
-				log.Printf("Error marshaling users: %v", err)
-				usersSaveMutex.Unlock()
-				continue
-			}
-
-			if err := atomicWrite(USERS_FILE_PATH, data, 0644); err != nil {
-				log.Printf("Error saving users (atomic write failed): %v", err)
-			}
-
-			usersSaveMutex.Unlock()
-
-			if atomic.LoadInt32(&usersDirty) == 0 {
-				atomic.StoreInt32(&saveScheduled, 0)
-				if atomic.LoadInt32(&usersDirty) != 0 && atomic.CompareAndSwapInt32(&saveScheduled, 0, 1) {
-					continue
-				}
-				return
-			}
-		}
-	}()
+	for _, id := range batch {
+		flushUser(id)
+	}
 }
 
 func copyUser(u User) User {
@@ -292,8 +215,8 @@ func copyUser(u User) User {
 
 	mu := getMutexForUser(u)
 
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 
 	return deepCopyUser(u)
 }
@@ -355,7 +278,7 @@ func deepCopyValue(v any) any {
 }
 
 func loadFollowers() {
-	tempData := loadJSONOrDefault(FOLLOWERS_FILE_PATH, map[UserId]FollowerData{})
+	tempData := loadJSONOrDefault(config.FOLLOWERS_FILE_PATH, map[UserId]FollowerData{})
 
 	validFollowersData := make(map[UserId]FollowerData)
 	for k, v := range tempData {
@@ -392,7 +315,7 @@ func loadFollowers() {
 func saveFollowers() {
 	followersMutex.RLock()
 	defer followersMutex.RUnlock()
-	saveJsonFile(FOLLOWERS_FILE_PATH, followersData)
+	saveJsonFile(config.FOLLOWERS_FILE_PATH, followersData)
 }
 
 func loadJSONOrDefault[T any](path string, def T) T {
@@ -414,34 +337,34 @@ func loadJSONOrDefault[T any](path string, def T) T {
 func loadPosts() {
 	postsMutex.Lock()
 	defer postsMutex.Unlock()
-	posts = loadJSONOrDefault(LOCAL_POSTS_PATH, []Post{})
+	posts = loadJSONOrDefault(config.LOCAL_POSTS_PATH, []Post{})
 	log.Printf("Loaded %d posts", len(posts))
 }
 
 func savePosts() {
 	postsMutex.RLock()
 	defer postsMutex.RUnlock()
-	saveJsonFile(LOCAL_POSTS_PATH, posts)
+	saveJsonFile(config.LOCAL_POSTS_PATH, posts)
 }
 
 func loadItems() {
 	itemsMutex.Lock()
 	defer itemsMutex.Unlock()
-	items = loadJSONOrDefault(ITEMS_FILE_PATH, []Item{})
+	items = loadJSONOrDefault(config.ITEMS_FILE_PATH, []Item{})
 	log.Printf("Loaded %d items", len(items))
 }
 
 func saveItems() {
 	itemsMutex.RLock()
 	defer itemsMutex.RUnlock()
-	saveJsonFile(ITEMS_FILE_PATH, items)
+	saveJsonFile(config.ITEMS_FILE_PATH, items)
 }
 
 func loadKeys() {
 	keysMutex.Lock()
 	defer keysMutex.Unlock()
 
-	keys = loadJSONOrDefault(KEYS_FILE_PATH, []Key{})
+	keys = loadJSONOrDefault(config.KEYS_FILE_PATH, []Key{})
 
 	keyStringToIdxInner := make(map[string]int, len(keys))
 	for i, k := range keys {
@@ -455,33 +378,33 @@ func loadKeys() {
 func saveKeys() {
 	keysMutex.RLock()
 	defer keysMutex.RUnlock()
-	saveJsonFile(KEYS_FILE_PATH, keys)
+	saveJsonFile(config.KEYS_FILE_PATH, keys)
 }
 
 func loadSystems() {
 	systemsMutex.Lock()
 	defer systemsMutex.Unlock()
-	systems = loadJSONOrDefault(SYSTEMS_FILE_PATH, map[string]System{})
+	systems = loadJSONOrDefault(config.SYSTEMS_FILE_PATH, map[string]System{})
 	log.Printf("Loaded %d systems", len(systems))
 }
 
 func saveSystems() {
 	systemsMutex.RLock()
 	defer systemsMutex.RUnlock()
-	saveJsonFile(SYSTEMS_FILE_PATH, systems)
+	saveJsonFile(config.SYSTEMS_FILE_PATH, systems)
 }
 
 func loadEventsHistory() {
 	eventsHistoryMutex.Lock()
 	defer eventsHistoryMutex.Unlock()
-	eventsHistory = loadJSONOrDefault(EVENTS_HISTORY_PATH, map[UserId][]Event{})
+	eventsHistory = loadJSONOrDefault(config.EVENTS_HISTORY_PATH, map[UserId][]Event{})
 	log.Printf("Loaded %d events history", len(eventsHistory))
 }
 
 func saveEventsHistory() {
 	eventsHistoryMutex.RLock()
 	defer eventsHistoryMutex.RUnlock()
-	saveJsonFile(EVENTS_HISTORY_PATH, eventsHistory)
+	saveJsonFile(config.EVENTS_HISTORY_PATH, eventsHistory)
 }
 
 var (
@@ -519,6 +442,7 @@ func saveJsonFile(path string, v any) bool {
 }
 
 func flushAll() {
+	flushDirtyUsers()
 	savePosts()
 	saveScheduledPosts()
 	saveBookmarks()
@@ -547,8 +471,4 @@ func watchFile(path string, reload func()) {
 			}
 		}
 	}
-}
-
-func watchUsersFile() {
-	watchFile(USERS_FILE_PATH, loadUsers)
 }

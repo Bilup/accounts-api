@@ -303,7 +303,7 @@ func getFollowersStats(c *gin.Context) {
 
 	followersMutex.RLock()
 	for userId, data := range followersData {
-		username := userId.User().GetUsername()
+		username := getUserById(userId).GetUsername()
 		if userStatusMap[username.ToLower()] {
 			followersList = append(followersList, followerStats{
 				Username:      username,

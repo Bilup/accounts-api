@@ -1,11 +1,14 @@
 package main
 
 import (
+	"claw/internal/config"
 	"crypto/sha256"
 	"fmt"
 	"maps"
 	"strings"
 	"time"
+
+	"claw/internal/pwhash"
 
 	"github.com/google/uuid"
 )
@@ -33,21 +36,20 @@ func createAccount(in AccountCreateInput) (User, error) {
 		return nil, fmt.Errorf("system is required")
 	}
 
+	emailLower := strings.ToLower(strings.TrimSpace(in.Email))
+
 	usersMutex.Lock()
 	defer usersMutex.Unlock()
 
-	for _, user := range users {
-		mu := getMutexForUser(user)
-		mu.Lock()
-		uname, _ := user["username"].(string)
-		em, _ := user["email"].(string)
-		mu.Unlock()
-		if Username(uname).ToLower() == usernameLower {
-			return nil, fmt.Errorf("username already in use")
-		}
-		if strings.EqualFold(em, in.Email) {
-			return nil, fmt.Errorf("email already in use")
-		}
+	idToUserMutex.RLock()
+	_, usernameTaken := usernameToId[usernameLower]
+	_, emailTaken := emailToId[emailLower]
+	idToUserMutex.RUnlock()
+	if usernameTaken {
+		return nil, fmt.Errorf("username already in use")
+	}
+	if emailTaken {
+		return nil, fmt.Errorf("email already in use")
 	}
 
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(in.RequestIP)))
@@ -116,15 +118,20 @@ func createAccount(in AccountCreateInput) (User, error) {
 	}
 
 	salt := getOrCreateSalt(newUser)
-	newUser["password"] = HashPBKDF2(in.Password, salt, PBKDF2_ITERATIONS)
+	newUser["password"] = pwhash.HashPBKDF2(in.Password, salt, config.PBKDF2_ITERATIONS)
 
 	users = append(users, newUser)
-	idx := len(users) - 1
+	newId := newUser.GetId()
 	idToUserMutex.Lock()
-	usernameToId[usernameLower] = newUser.GetId()
-	idToUser[newUser.GetId()] = newUser
-	keyToUserIdx[newUser.GetKey()] = idx
+	usernameToId[usernameLower] = newId
+	idToUser[newId] = newUser
+	if k := newUser.GetKey(); k != "" {
+		keyToId[k] = newId
+	}
+	if emailLower != "" {
+		emailToId[emailLower] = newId
+	}
 	idToUserMutex.Unlock()
-	go saveUsers()
+	saveUser(newId)
 	return newUser, nil
 }

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"claw/internal/model"
 )
 
 type subscription struct {
@@ -32,35 +34,17 @@ type sub_benefits struct {
 	Daily_Credit_Multipler  int  `json:"daily_credit_multiplier"`
 }
 
-type Username string
+type Username = model.Username
 
-func (u Username) ToLower() Username {
-	return Username(strings.ToLower(string(u)))
-}
+type UserId = model.UserId
 
-func (u Username) Id() UserId {
-	return getIdByUsername(u)
-}
-
-type UserId string
-
-func (u UserId) User() User {
-	idToUserMutex.RLock()
-	defer idToUserMutex.RUnlock()
-	return idToUser[u]
-}
+type Timestamp = model.Timestamp
 
 func userIdFromParam(param string) UserId {
 	if user, err := getAccountByUsername(param); err == nil {
 		return user.GetId()
 	}
 	return UserId(param)
-}
-
-type Timestamp int64
-
-func (t Timestamp) Time() time.Time {
-	return time.UnixMilli(int64(t))
 }
 
 type GroupId string
@@ -286,7 +270,7 @@ func (g Group) ToNet() GroupNet {
 		Rules:          g.Rules,
 		IconUrl:        g.IconUrl,
 		BannerUrl:      g.BannerUrl,
-		OwnerUserId:    g.OwnerUserId.User().GetUsername(),
+		OwnerUserId:    getUserById(g.OwnerUserId).GetUsername(),
 		Public:         g.Public,
 		JoinPolicy:     g.JoinPolicy,
 		EntryFee:       g.EntryFee,
@@ -434,18 +418,25 @@ type GroupData struct {
 }
 
 var userMutexesLock sync.Mutex
-var userPtrMutexes = map[uintptr]*sync.Mutex{}
+var userPtrMutexes = map[uintptr]*sync.RWMutex{}
 
-func getMutexForUser(u User) *sync.Mutex {
+func getMutexForUser(u User) *sync.RWMutex {
 	ptr := reflect.ValueOf(u).Pointer()
 	userMutexesLock.Lock()
 	defer userMutexesLock.Unlock()
 	mu, ok := userPtrMutexes[ptr]
 	if !ok {
-		mu = &sync.Mutex{}
+		mu = &sync.RWMutex{}
 		userPtrMutexes[ptr] = mu
 	}
 	return mu
+}
+
+func dropMutexForUser(u User) {
+	ptr := reflect.ValueOf(u).Pointer()
+	userMutexesLock.Lock()
+	delete(userPtrMutexes, ptr)
+	userMutexesLock.Unlock()
 }
 
 var subs_benefits = map[string]sub_benefits{
@@ -532,8 +523,8 @@ type User map[string]any
 // Helper methods for User
 func (u User) GetUsername() Username {
 	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 	if v, ok := u["username"]; ok {
 		if str, ok := v.(string); ok {
 			return Username(str)
@@ -544,8 +535,8 @@ func (u User) GetUsername() Username {
 
 func (u User) GetTheme() map[string]any {
 	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 	if theme, ok := u["theme"]; ok {
 		if m, ok := theme.(map[string]any); ok {
 			return m
@@ -556,8 +547,8 @@ func (u User) GetTheme() map[string]any {
 
 func (u User) GetId() UserId {
 	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 	if id, ok := u["sys.id"]; ok {
 		if str, ok := id.(string); ok {
 			return UserId(str)
@@ -569,8 +560,8 @@ func (u User) GetId() UserId {
 
 func (u User) GetKey() string {
 	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 	if key, ok := u["key"]; ok {
 		if str, ok := key.(string); ok {
 			return str
@@ -581,8 +572,8 @@ func (u User) GetKey() string {
 
 func (u User) GetPassword() string {
 	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 	if password, ok := u["password"]; ok {
 		if str, ok := password.(string); ok {
 			return str
@@ -728,7 +719,7 @@ func (u User) AddRequest(username Username) bool {
 		return false
 	}
 	requests := u.GetRequests()
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	requests = append(requests, userId)
 	u.SetRequests(requests)
 	return true
@@ -739,7 +730,7 @@ func (u User) RemoveRequest(username Username) bool {
 		return false
 	}
 	requests := u.GetRequests()
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	requestIds := make([]UserId, 0, len(requests)-1)
 	for _, r := range requests {
 		if r != userId {
@@ -751,7 +742,7 @@ func (u User) RemoveRequest(username Username) bool {
 }
 
 func (u User) HasRequest(username Username) bool {
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	if userId == "" {
 		return false
 	}
@@ -768,7 +759,7 @@ func (u User) AddFriend(username Username) bool {
 	if u.IsFriend(username) {
 		return false
 	}
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	friends = append(friends, userId)
 	u.SetFriends(friends)
 
@@ -780,7 +771,7 @@ func (u User) RemoveFriend(username Username) bool {
 	if !u.IsFriend(username) {
 		return false
 	}
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	newFriends := make([]UserId, 0, len(friends)-1)
 	for _, f := range friends {
 		if f != userId {
@@ -793,7 +784,7 @@ func (u User) RemoveFriend(username Username) bool {
 }
 
 func (u User) IsFriend(username Username) bool {
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	if userId == "" {
 		return false
 	}
@@ -899,7 +890,7 @@ func (u User) SetNote(username Username, note string) error {
 		return fmt.Errorf("note content is too long")
 	}
 	notes := u.GetNotes()
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	notes[userId] = note
 	u.Set("sys.notes", notes)
 	return nil
@@ -907,7 +898,7 @@ func (u User) SetNote(username Username, note string) error {
 
 func (u User) RemoveNote(username Username) {
 	notes := u.GetNotes()
-	userId := username.Id()
+	userId := getIdByUsername(username)
 	delete(notes, userId)
 	u.Set("sys.notes", notes)
 }
@@ -916,7 +907,7 @@ func (u User) GetNotesNet() map[Username]string {
 	notes := u.GetNotes()
 	out := make(map[Username]string, len(notes))
 	for id, note := range notes {
-		user := id.User()
+		user := getUserById(id)
 		if user == nil {
 			continue
 		}
@@ -929,8 +920,8 @@ func (u User) GetNotesNet() map[Username]string {
 
 func (u User) GetCredits() float64 {
 	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 	if credits, ok := u["sys.currency"]; ok {
 		switch v := credits.(type) {
 		case float64:
@@ -1152,16 +1143,16 @@ func (u User) SetLogins(logins []Login) {
 
 func (u User) Has(key string) bool {
 	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 	_, ok := u[key]
 	return ok
 }
 
 func (u User) Get(key string) any {
 	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 	value, ok := u[key]
 	if ok {
 		return value
@@ -1171,8 +1162,8 @@ func (u User) Get(key string) any {
 
 func (u User) GetString(key string) string {
 	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 	value, ok := u[key]
 	if ok {
 		switch v := value.(type) {
@@ -1189,8 +1180,8 @@ func (u User) GetString(key string) string {
 
 func (u User) GetInt(key string) int {
 	mu := getMutexForUser(u)
-	mu.Lock()
-	defer mu.Unlock()
+	mu.RLock()
+	defer mu.RUnlock()
 	value, ok := u[key]
 	if ok {
 		switch v := value.(type) {
@@ -1220,6 +1211,9 @@ func (u User) DelKey(key string) error {
 	}
 	delete(u, key)
 	mu.Unlock()
+	if id := u.GetId(); id != "" {
+		saveUser(id)
+	}
 	go notify("sys.delete", map[string]any{
 		"username": username,
 		"key":      key,
@@ -1240,44 +1234,18 @@ func (u User) Set(key string, value any) {
 		}
 	}
 
-	var keyUpdate struct {
-		oldKey, newKey string
-		uid            UserId
-	}
-	needKeyUpdate := false
-	if key == "key" {
-		keyUpdate.oldKey, _ = oldValue.(string)
-		keyUpdate.newKey, _ = value.(string)
-		keyUpdate.uid = uid
-		if keyUpdate.oldKey != keyUpdate.newKey {
-			needKeyUpdate = true
-		}
-	}
-
 	mu.Unlock()
 
-	if needKeyUpdate {
-		usersMutex.RLock()
-		idToUserMutex.Lock()
-		if keyUpdate.oldKey != "" {
-			delete(keyToUserIdx, keyUpdate.oldKey)
-		}
-		if keyUpdate.newKey != "" {
-			for i := range users {
-				if users[i].GetId() == keyUpdate.uid {
-					keyToUserIdx[keyUpdate.newKey] = i
-					break
-				}
-			}
-		}
-		idToUserMutex.Unlock()
-		usersMutex.RUnlock()
-	}
+	maintainUserIndexOnSet(uid, key, oldValue, value)
 
 	if key != "key" && key != "password" {
 		if uid != "" {
 			go OnUserUpdate(uid, key, value)
 		}
+	}
+
+	if uid != "" {
+		saveUser(uid)
 	}
 }
 
@@ -1379,7 +1347,7 @@ type NetPost struct {
 }
 
 func resolveUser(u UserId) Username {
-	if name := u.User().GetUsername(); name != "" {
+	if name := getUserById(u).GetUsername(); name != "" {
 		return name
 	}
 	return Username(u)
@@ -1550,7 +1518,7 @@ func (g Gift) ToNet() GiftNet {
 		claimedAt = g.ClaimedAt
 	}
 	if g.ClaimedBy != nil {
-		username := g.ClaimedBy.User().GetUsername()
+		username := getUserById(*g.ClaimedBy).GetUsername()
 		claimedBy = &username
 	}
 	return GiftNet{
@@ -1558,7 +1526,7 @@ func (g Gift) ToNet() GiftNet {
 		Code:      g.Code,
 		Amount:    g.Amount,
 		Note:      g.Note,
-		CreatorId: g.CreatorId.User().GetUsername(),
+		CreatorId: getUserById(g.CreatorId).GetUsername(),
 		CreatedAt: g.CreatedAt,
 		ExpiresAt: g.ExpiresAt,
 		ClaimedAt: claimedAt,
@@ -1571,7 +1539,7 @@ func (g Gift) ToPublic() GiftPublic {
 		Code:      g.Code,
 		Amount:    g.Amount,
 		Note:      g.Note,
-		CreatorId: g.CreatorId.User().GetUsername(),
+		CreatorId: getUserById(g.CreatorId).GetUsername(),
 		ExpiresAt: g.ExpiresAt,
 	}
 }
@@ -1649,8 +1617,8 @@ func (g CosmeticGift) ToNet() CosmeticGiftNet {
 		Id:           g.Id,
 		CosmeticId:   g.CosmeticId,
 		CosmeticName: cosmeticName,
-		From:         g.FromUserId.User().GetUsername(),
-		To:           g.ToUserId.User().GetUsername(),
+		From:         getUserById(g.FromUserId).GetUsername(),
+		To:           getUserById(g.ToUserId).GetUsername(),
 		Note:         g.Note,
 		Amount:       g.Amount,
 		CreatedAt:    g.CreatedAt,
@@ -1659,7 +1627,7 @@ func (g CosmeticGift) ToNet() CosmeticGiftNet {
 }
 
 func (t Transaction) ToNet() TransactionNet {
-	name := t.User.User().GetUsername()
+	name := getUserById(t.User).GetUsername()
 	if name == "" {
 		name = Username(t.User)
 	}
@@ -1731,8 +1699,8 @@ func (i Item) ToNet() NetItem {
 		Description:     i.Description,
 		Price:           i.Price,
 		Selling:         i.Selling,
-		Author:          i.Author.User().GetUsername(),
-		Owner:           i.Owner.User().GetUsername(),
+		Author:          getUserById(i.Author).GetUsername(),
+		Owner:           getUserById(i.Owner).GetUsername(),
 		PrivateData:     i.PrivateData,
 		Created:         i.Created,
 		TransferHistory: transferHistory,
@@ -1779,13 +1747,13 @@ func (t TransferHistory) ToNet() NetTransferHistory {
 		return NetTransferHistory{}
 	}
 
-	username := t.From.User().GetUsername()
+	username := getUserById(*t.From).GetUsername()
 	if username != "" {
 		from = &username
 	}
 	return NetTransferHistory{
 		From:      from,
-		To:        t.To.User().GetUsername(),
+		To:        getUserById(t.To).GetUsername(),
 		Timestamp: t.Timestamp,
 		Type:      t.Type,
 		Price:     t.Price,
@@ -1817,7 +1785,7 @@ type Key struct {
 func (key *Key) ToNet() NetKey {
 	users := make(map[Username]KeyUserData)
 	for uid, v := range key.Users {
-		users[uid.User().GetUsername()] = v
+		users[getUserById(uid).GetUsername()] = v
 	}
 	return NetKey{
 		Key:          key.Key,
@@ -1828,7 +1796,7 @@ func (key *Key) ToNet() NetKey {
 		Webhook:      key.Webhook,
 		Subscription: key.Subscription,
 		Users:        users,
-		Creator:      key.Creator.User().GetUsername(),
+		Creator:      getUserById(key.Creator).GetUsername(),
 	}
 }
 
@@ -2045,12 +2013,15 @@ func (u User) HasStandingOrHigher(required StandingLevel) bool {
 var (
 	startTime = time.Now()
 
-	users         []User
-	usernameToId  map[Username]UserId
-	idToUser      map[UserId]User
-	keyToUserIdx  map[string]int
-	idToUserMutex sync.RWMutex
-	usersMutex    sync.RWMutex
+	users           []User
+	usernameToId    map[Username]UserId
+	idToUser        map[UserId]User
+	keyToId         map[string]UserId
+	emailToId       map[string]UserId
+	resetTokenToId  map[string]UserId
+	verifyTokenToId map[string]UserId
+	idToUserMutex   sync.RWMutex
+	usersMutex      sync.RWMutex
 
 	groupsData      map[string]*GroupData
 	groupsDataMutex sync.RWMutex

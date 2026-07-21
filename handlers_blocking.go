@@ -14,7 +14,7 @@ func getBlocking(c *gin.Context) {
 
 func blockUser(c *gin.Context) {
 	user := currentUser(c)
-	userId := Username(c.Param("username")).Id()
+	userId := getIdByUsername(Username(c.Param("username")))
 
 	if !requireField(c, userId, "Username is required") {
 		return
@@ -41,7 +41,7 @@ func blockUser(c *gin.Context) {
 	blockerId := user.GetId()
 	blockerFollowers, blockedFollowers, followsChanged := severFollowsForBlock(blockerId, userId)
 
-	blockedUser := userId.User()
+	blockedUser := getUserById(userId)
 	blockerName := user.GetUsername().ToLower()
 	blockedName := blockedUser.GetUsername().ToLower()
 	user.RemoveFriend(blockedName)
@@ -96,7 +96,7 @@ func severFollowsForBlock(blockerId, blockedId UserId) (blockerFollowers, blocke
 
 func unblockUser(c *gin.Context) {
 	user := currentUser(c)
-	userId := Username(c.Param("username")).Id()
+	userId := getIdByUsername(Username(c.Param("username")))
 
 	if !requireField(c, userId, "Username is required") {
 		return

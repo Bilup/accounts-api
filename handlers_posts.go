@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"encoding/json"
 	"log"
 	"os"
@@ -96,7 +97,7 @@ func notifyMentions(content string, author UserId, postID string) {
 	}
 	seen := map[UserId]bool{author: true}
 	for _, m := range matches {
-		uid := Username(m[1]).Id()
+		uid := getIdByUsername(Username(m[1]))
 		if uid == "" || seen[uid] {
 			continue
 		}
@@ -599,7 +600,7 @@ func ratePost(c *gin.Context) {
 	if !profileOnly {
 		likes := make([]Username, 0, len(likesSnapshot))
 		for _, liker := range likesSnapshot {
-			likes = append(likes, liker.User().GetUsername())
+			likes = append(likes, getUserById(liker).GetUsername())
 		}
 		go broadcastClawEvent("update_post", map[string]any{
 			"id":   postID,
@@ -904,7 +905,7 @@ func loadEnvFile() {
 		}
 	}
 	// Reload config variables after populating environment
-	loadConfigFromEnv()
+	config.Load()
 }
 
 func getFeed(c *gin.Context) {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/config"
 	"log"
 	"sync"
 
@@ -14,7 +15,7 @@ var (
 
 func loadDeletedAccounts() {
 	deletedAccountsMutex.Lock()
-	deletedAccounts = loadJSONOrDefault(DELETED_ACCOUNTS_PATH, map[UserId]int64{})
+	deletedAccounts = loadJSONOrDefault(config.DELETED_ACCOUNTS_PATH, map[UserId]int64{})
 	count := len(deletedAccounts)
 	deletedAccountsMutex.Unlock()
 	log.Printf("Loaded %d deleted account records", count)
@@ -27,7 +28,7 @@ func saveDeletedAccounts() {
 		snapshot[k] = v
 	}
 	deletedAccountsMutex.RUnlock()
-	saveJsonFile(DELETED_ACCOUNTS_PATH, snapshot)
+	saveJsonFile(config.DELETED_ACCOUNTS_PATH, snapshot)
 }
 
 func recordDeletedAccount(id UserId, ts int64) {

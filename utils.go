@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+
+	"claw/internal/model"
 	"fmt"
 	"io"
 	"log"
@@ -40,83 +42,14 @@ func generateShortToken() string {
 	return hex.EncodeToString(bytes)
 }
 
-func roundVal(val float64) float64 {
-	return math.Round(val*100) / 100
-}
-
-func getStringOrEmpty(val any) string {
-	return getStringOrDefault(val, "")
-}
-
-func getStringOrDefault(val any, defaultVal string) string {
-	if val == nil {
-		return defaultVal
-	}
-	if s, ok := val.(string); ok {
-		return s
-	}
-	return defaultVal
-}
-
-func getIntOrDefault(val any, defaultVal int) int {
-	if val == nil {
-		return defaultVal
-	}
-
-	switch v := val.(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	}
-
-	return defaultVal
-}
-
-func getInt64OrDefault(val any, defaultVal int64) int64 {
-	if val == nil {
-		return defaultVal
-	}
-
-	switch v := val.(type) {
-	case int64:
-		return v
-	case int:
-		return int64(v)
-	case float64:
-		return int64(v)
-	case float32:
-		return int64(v)
-	case json.Number:
-		i, _ := v.Int64()
-		return i
-	}
-
-	return defaultVal
-}
-
-func getFloatOrDefault(val any, defaultVal float64) float64 {
-	if val == nil {
-		return defaultVal
-	}
-	switch val := val.(type) {
-	case float64:
-		return val
-	case float32:
-		return float64(val)
-	case int:
-		return float64(val)
-	case int64:
-		return float64(val)
-	case json.Number:
-		f, _ := val.Float64()
-		return f
-	default:
-		return defaultVal
-	}
-}
+var (
+	roundVal           = model.RoundVal
+	getStringOrEmpty   = model.GetStringOrEmpty
+	getStringOrDefault = model.GetStringOrDefault
+	getIntOrDefault    = model.GetIntOrDefault
+	getInt64OrDefault  = model.GetInt64OrDefault
+	getFloatOrDefault  = model.GetFloatOrDefault
+)
 
 func requireTier(tier string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -331,16 +264,6 @@ func cleanRateLimitStorage() {
 
 		rateLimitMutex.Unlock()
 	}
-}
-
-func getUserByIdx(idx int) (*User, error) {
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-	if idx < 0 || len(users) <= idx {
-		return nil, fmt.Errorf("index out of bounds")
-	}
-	user := users[idx]
-	return &user, nil
 }
 
 func rateLimit(limitType string) gin.HandlerFunc {
@@ -715,21 +638,23 @@ func deleteAccountAtIndexFast(idx int) error {
 	removedUserId := removedUser.GetId()
 	removedUsername := removedUser.GetUsername().ToLower()
 	removedKey := removedUser.GetKey()
+	removedEmail := strings.ToLower(strings.TrimSpace(removedUser.GetEmail()))
 
 	users = append(users[:idx], users[idx+1:]...)
 
 	idToUserMutex.Lock()
 	delete(idToUser, removedUserId)
 	delete(usernameToId, removedUsername)
-	delete(keyToUserIdx, removedKey)
-	for i := idx; i < len(users); i++ {
-		if k := users[i].GetKey(); k != "" {
-			keyToUserIdx[k] = i
-		}
+	if removedKey != "" {
+		delete(keyToId, removedKey)
+	}
+	if removedEmail != "" {
+		delete(emailToId, removedEmail)
 	}
 	idToUserMutex.Unlock()
 
-	go saveUsers()
+	dropMutexForUser(removedUser)
+	deleteUserFile(removedUserId)
 	return nil
 }
 

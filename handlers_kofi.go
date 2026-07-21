@@ -131,7 +131,7 @@ func handleKofiTransaction(c *gin.Context) {
 				balance := float64(account.GetCredits()) + float64(credits)
 				account.applyTransaction(balance, Transaction{
 					Note:      fmt.Sprintf("%d credit purchase", credits),
-					User:      Username("rotur").Id(),
+					User:      getIdByUsername(Username("rotur")),
 					Timestamp: now,
 					Amount:    float64(credits),
 					Type:      "transfer",

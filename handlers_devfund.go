@@ -65,7 +65,7 @@ func escrowTransfer(c *gin.Context) {
 
 	user.applyTransaction(newBal, Transaction{
 		Note:       note,
-		User:       Username("rotur").Id(),
+		User:       getIdByUsername(Username("rotur")),
 		Timestamp:  now,
 		Amount:     nAmount,
 		Type:       "escrow_out",
@@ -128,7 +128,7 @@ func performEscrowRelease(c *gin.Context, req escrowReleaseRequest) {
 
 	toUser.applyTransaction(newBal, Transaction{
 		Note:       note,
-		User:       Username("rotur").Id(),
+		User:       getIdByUsername(Username("rotur")),
 		Timestamp:  now,
 		Amount:     nAmount,
 		Type:       "escrow_in",

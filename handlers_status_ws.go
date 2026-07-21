@@ -342,7 +342,7 @@ func (h *Hub) broadcastProfileUpdate(uid UserId, key string, value any) {
 	state := h.mergedStateLocked(uid)
 	username := state.Username
 	if username == "" {
-		username = uid.User().GetUsername()
+		username = getUserById(uid).GetUsername()
 	}
 
 	roomNames := h.allRoomsForUserLocked(uid)

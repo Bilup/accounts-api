@@ -17,30 +17,18 @@ func isHardcodedAdmin(username Username) bool {
 }
 
 func authenticateWithKey(key string) *User {
-	idToUserMutex.RLock()
-	idx, ok := keyToUserIdx[key]
-	idToUserMutex.RUnlock()
-	if ok {
-		usersMutex.RLock()
-		var user User
-		if idx >= 0 && idx < len(users) {
-			user = users[idx]
-		}
-		usersMutex.RUnlock()
-		if user != nil && user.GetKey() == key {
-			return &user
-		}
+	if key == "" {
+		return nil
 	}
-
-	usersMutex.RLock()
-	defer usersMutex.RUnlock()
-	for i := range users {
-		if users[i].GetKey() == key {
-			// Copy the map header out of the slice: slice slots can be
-			// swapped by concurrent deletes after the lock is released.
-			user := users[i]
-			return &user
-		}
+	idToUserMutex.RLock()
+	id, ok := keyToId[key]
+	idToUserMutex.RUnlock()
+	if !ok {
+		return nil
+	}
+	user := getUserById(id)
+	if user != nil && user.GetKey() == key {
+		return &user
 	}
 	return nil
 }
