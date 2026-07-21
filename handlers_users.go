@@ -1324,6 +1324,10 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 	}
 	log.Printf("%s %s", logPrefix, usernameLower)
 
+	usersMutex.RLock()
+	uId := users[idx].GetId()
+	usersMutex.RUnlock()
+
 	if ban {
 		usersMutex.Lock()
 		oldUser := users[idx]
@@ -1347,9 +1351,12 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 		deleteAccountAtIndexFast(idx)
 	}
 
-	go broadcastUserUpdate(usernameLower, "sys._deleted", true)
-
-	uId := usernameLower.Id()
+	go broadcastClawEvent("account_deleted", map[string]any{"id": uId})
+	if !ban {
+		ts := time.Now().UnixMilli()
+		recordDeletedAccount(uId, ts)
+		go notifyAccountDeleted(uId, ts)
+	}
 
 	usersMutex.RLock()
 	for i := range users {
@@ -1381,43 +1388,74 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 				break
 			}
 		}
+
+		target.RemoveNote(usernameLower)
 	}
 	usersMutex.RUnlock()
 
 	go saveUsers()
 
 	go func(target UserId, username Username) {
+		scrubPost := func(p *Post) {
+			if p.User == target {
+				p.User = "Deleted User"
+			}
+			for j := range p.Replies {
+				if p.Replies[j].User == target {
+					p.Replies[j].User = "Deleted User"
+				}
+			}
+			if len(p.Likes) > 0 {
+				p.Likes = slices.DeleteFunc(p.Likes, func(u UserId) bool { return u == target })
+			}
+			if len(p.Viewers) > 0 {
+				p.Viewers = slices.DeleteFunc(p.Viewers, func(u UserId) bool { return u == target })
+			}
+			if p.Poll != nil {
+				delete(p.Poll.Votes, target)
+			}
+		}
+
 		postsMutex.Lock()
 		for i := range posts {
-			if posts[i].User == target {
-				posts[i].User = "Deleted User"
-			}
-			for j := range posts[i].Replies {
-				if posts[i].Replies[j].User == target {
-					posts[i].Replies[j].User = "Deleted User"
-				}
-			}
+			scrubPost(&posts[i])
 			if posts[i].OriginalPost != nil {
-				if posts[i].OriginalPost.User == target {
-					posts[i].OriginalPost.User = "Deleted User"
-				}
-				for j := range posts[i].OriginalPost.Replies {
-					if posts[i].OriginalPost.Replies[j].User == target {
-						posts[i].OriginalPost.Replies[j].User = "Deleted User"
-					}
-				}
+				scrubPost(posts[i].OriginalPost)
 			}
 		}
 		postsMutex.Unlock()
 		go savePosts()
 
+		bookmarksMutex.Lock()
+		delete(bookmarks, target)
+		bookmarksMutex.Unlock()
+		go saveBookmarks()
+
+		scheduledMutex.Lock()
+		scheduledPosts = slices.DeleteFunc(scheduledPosts, func(p Post) bool { return p.User == target })
+		scheduledMutex.Unlock()
+		go saveScheduledPosts()
+
+		eventsHistoryMutex.Lock()
+		delete(eventsHistory, target)
+		eventsHistoryMutex.Unlock()
+		go saveEventsHistory()
+
 		// remove avatar and banner
 		deleteUserAvatar(username)
 
+		claimsData := loadDailyClaims()
+		if _, ok := claimsData[username]; ok {
+			delete(claimsData, username)
+			saveDailyClaims(claimsData)
+		}
+
 		// Remove user storage
-		userDir := string("rotur/user_storage/" + target)
-		if err := os.RemoveAll(userDir); err != nil {
-			log.Printf("Error removing user directory %s: %v", userDir, err)
+		if target != "" {
+			userDir := string("rotur/user_storage/" + target)
+			if err := os.RemoveAll(userDir); err != nil {
+				log.Printf("Error removing user directory %s: %v", userDir, err)
+			}
 		}
 
 		// remove file system

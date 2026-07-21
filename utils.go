@@ -663,6 +663,12 @@ func hmacIp(ip string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+func signAccountDeletion(id UserId, ts int64) string {
+	mac := hmac.New(sha256.New, []byte(os.Getenv("HMAC_KEY")))
+	mac.Write([]byte(string(id) + ":" + strconv.FormatInt(ts, 10)))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 func sendDiscordWebhook(data []map[string]any) {
 	webhook := os.Getenv("ACCOUNT_CREATION_WEBHOOK")
 

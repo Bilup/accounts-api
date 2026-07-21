@@ -30,6 +30,7 @@ func main() {
 	loadCosmeticsCatalog()
 	loadFeatureStores()
 	loadReports()
+	loadDeletedAccounts()
 	go scheduleLoop()
 	loadCosmeticGifts()
 	buildSubTokenIndex()
@@ -318,6 +319,7 @@ func main() {
 	r.PATCH("/users", updateUser)
 	r.DELETE("/users", deleteUserKey)
 	r.DELETE("/users/:username", requiresAuth, requirePermission(PermDeleteAccount), deleteUser)
+	r.POST("/accounts/deleted_check", checkDeletedAccounts)
 
 	files := r.Group("/files")
 	{

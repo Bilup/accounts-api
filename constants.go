@@ -10,6 +10,8 @@ const DAILY_CLAIMS_FILE_PATH = "./rotur_daily.json"
 
 const USERS_FILE_PATH = "./users.json"
 
+const DELETED_ACCOUNTS_PATH = "./deleted_accounts.json"
+
 const LITE_SUBSCRIPTION_KEY = "4f229157f0c40f5a98cbf28efd39cfe8"
 
 var (

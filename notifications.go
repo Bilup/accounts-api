@@ -175,6 +175,18 @@ func notify(eventType string, data any) bool {
 	return success
 }
 
+func notifyAccountDeleted(id UserId, ts int64) bool {
+	if id == "" {
+		return false
+	}
+	payload := createEventPayload("account_deleted", map[string]any{
+		"id":  id,
+		"ts":  ts,
+		"sig": signAccountDeletion(id, ts),
+	})
+	return makeHTTPRequest("POST", EVENT_SERVER_URL, payload, 5*time.Second, "AccountDeleted", 200)
+}
+
 func broadcastUserUpdate(username Username, key string, value any) bool {
 	payload := createEventPayload("user_account_update", map[string]any{
 		"username": username,
