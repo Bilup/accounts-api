@@ -120,6 +120,8 @@ func createAccount(in AccountCreateInput) (User, error) {
 	salt := getOrCreateSalt(newUser)
 	newUser["password"] = pwhash.HashPBKDF2(in.Password, salt, config.PBKDF2_ITERATIONS)
 
+	newUser["sys.index"] = nextUserIndex()
+
 	users = append(users, newUser)
 	newId := newUser.GetId()
 	idToUserMutex.Lock()

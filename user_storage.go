@@ -238,7 +238,7 @@ func maintainUserIndexOnSet(uid UserId, key string, oldValue, value any) {
 
 func watchUserIndexes() {
 	for {
-		time.Sleep(2 * time.Second)
+		time.Sleep(60 * time.Second)
 		rebuildUserIndexes()
 	}
 }

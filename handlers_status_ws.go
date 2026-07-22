@@ -558,11 +558,10 @@ func (h *Hub) persistStatusLocked(uid UserId, us *UserStatus) {
 	if user == nil {
 		return
 	}
-	user.Set("sys.status", map[string]any{
+	user.SetTransient("sys.status", map[string]any{
 		"presence": string(us.Presence),
 		"status":   us.Status,
 	})
-	go saveUsers()
 }
 
 func init() {

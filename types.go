@@ -859,6 +859,10 @@ func (u User) GetCreated() int64 {
 	return getInt64OrDefault(u.Get("created"), 0)
 }
 
+func (u User) GetIndex() int64 {
+	return getInt64OrDefault(u.Get("sys.index"), 0)
+}
+
 func (u User) GetNotes() map[UserId]string {
 	notes := u.Get("sys.notes")
 	out := make(map[UserId]string)
@@ -1246,6 +1250,24 @@ func (u User) Set(key string, value any) {
 
 	if uid != "" {
 		saveUser(uid)
+	}
+}
+
+func (u User) SetTransient(key string, value any) {
+	mu := getMutexForUser(u)
+	mu.Lock()
+	u[key] = value
+
+	var uid UserId
+	if v, ok := u["sys.id"]; ok && v != nil {
+		if str, ok := v.(string); ok && str != "" {
+			uid = UserId(str)
+		}
+	}
+	mu.Unlock()
+
+	if uid != "" {
+		go OnUserUpdate(uid, key, value)
 	}
 }
 

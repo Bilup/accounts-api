@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -37,6 +38,9 @@ func loadUsers() {
 	}
 
 	users = loaded
+
+	assignMissingUserIndexesLocked()
+
 	fmt.Println("Loaded", len(loaded), "users")
 
 	rebuildUserIndexesLocked()
@@ -45,6 +49,55 @@ func loadUsers() {
 	userMutexesLock.Lock()
 	userPtrMutexes = make(map[uintptr]*sync.RWMutex, len(loaded))
 	userMutexesLock.Unlock()
+}
+
+var (
+	userIndexMu  sync.Mutex
+	userIndexMax int64
+)
+
+// assignMissingUserIndexesLocked stamps a persistent, monotonic ordinal on any
+// user that lacks one, ordered by creation time so newer accounts get higher
+// indexes. Existing indexes are never reassigned, so a user's index is stable
+// across restarts and unaffected by deletions. Callers must hold usersMutex.
+func assignMissingUserIndexesLocked() {
+	var maxIdx int64
+	var missing []int
+	for i := range users {
+		if idx := users[i].GetIndex(); idx > 0 {
+			if idx > maxIdx {
+				maxIdx = idx
+			}
+		} else {
+			missing = append(missing, i)
+		}
+	}
+
+	sort.SliceStable(missing, func(a, b int) bool {
+		ua, ub := users[missing[a]], users[missing[b]]
+		if ca, cb := ua.GetCreated(), ub.GetCreated(); ca != cb {
+			return ca < cb
+		}
+		return ua.GetId() < ub.GetId()
+	})
+	for _, i := range missing {
+		maxIdx++
+		users[i]["sys.index"] = maxIdx
+		saveUser(users[i].GetId())
+	}
+
+	userIndexMu.Lock()
+	if maxIdx > userIndexMax {
+		userIndexMax = maxIdx
+	}
+	userIndexMu.Unlock()
+}
+
+func nextUserIndex() int64 {
+	userIndexMu.Lock()
+	defer userIndexMu.Unlock()
+	userIndexMax++
+	return userIndexMax
 }
 
 func loadGroupData() {

@@ -205,7 +205,6 @@ func getProfile(c *gin.Context) {
 
 	// Convert the name to lowercase for case-insensitive comparison
 	name := Username(nameRaw)
-	nameLower := name.ToLower()
 	// Find user with case-insensitive matching
 	var foundUser User
 	if discord_id != "" {
@@ -216,7 +215,6 @@ func getProfile(c *gin.Context) {
 		}
 		foundUser = foundUsers[0]
 		name = foundUser.GetUsername()
-		nameLower = name.ToLower()
 	} else {
 		user, err := getAccountByUsername(name)
 		if err != nil {
@@ -226,8 +224,6 @@ func getProfile(c *gin.Context) {
 		}
 		foundUser = user
 	}
-	userIndex := getIdxOfAccountBy("username", string(nameLower))
-
 	userId := foundUser.GetId()
 
 	if foundUser.IsBanned() {
@@ -353,7 +349,7 @@ func getProfile(c *gin.Context) {
 		GroupTag:     groupTagForUser(foundUser),
 		MaxSize:      maxSizeStr,
 		Currency:     foundUser.GetCredits(),
-		Index:        userIndex + 1,
+		Index:        int(foundUser.GetIndex()),
 		Private:      foundUser.IsPrivate(),
 		Status:       st,
 		Id:           foundUser.GetId(),

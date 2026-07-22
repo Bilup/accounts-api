@@ -365,7 +365,6 @@ func userToNetWithSubToken(user User, subTokenValue string) User {
 
 func userToProfileOnly(user User, subTokenValue string) map[string]any {
 	username := user.GetUsername()
-	userIndex := getIdxOfAccountBy("username", string(username.ToLower()))
 	userId := user.GetId()
 	followersMutex.RLock()
 	followerCount := 0
@@ -399,7 +398,7 @@ func userToProfileOnly(user User, subTokenValue string) map[string]any {
 		"subscription": sub,
 		"max_size":     maxSizeStr,
 		"currency":     user.GetCredits(),
-		"index":        userIndex + 1,
+		"index":        int(user.GetIndex()),
 		"status":       st,
 		"id":           userId,
 	}
@@ -1328,6 +1327,7 @@ func performUserDeletion(username Username, isAdmin bool, ban bool) error {
 			"private":    true,
 			"sys.banned": true,
 			"sys.id":     string(oldId),
+			"sys.index":  oldUser.GetIndex(),
 		}
 		users[idx] = banned
 		idToUserMutex.Lock()
