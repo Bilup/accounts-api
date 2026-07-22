@@ -40,6 +40,9 @@ const (
 	PermViewFiles         TokenPermission = "files:view"
 	PermManageFiles       TokenPermission = "files:manage"
 	PermDeleteFiles       TokenPermission = "files:delete"
+	PermViewStorage       TokenPermission = "storage:view"
+	PermManageStorage     TokenPermission = "storage:manage"
+	PermDeleteStorage     TokenPermission = "storage:delete"
 	PermViewKeys          TokenPermission = "keys:view"
 	PermManageKeys        TokenPermission = "keys:manage"
 	PermViewGroups        TokenPermission = "groups:view"
@@ -98,6 +101,9 @@ func AllPermissions() []TokenPermission {
 		PermViewFiles,
 		PermManageFiles,
 		PermDeleteFiles,
+		PermViewStorage,
+		PermManageStorage,
+		PermDeleteStorage,
 		PermViewKeys,
 		PermManageKeys,
 		PermViewGroups,
@@ -140,7 +146,7 @@ func PermissionGroups() []PermissionGroup {
 			Description: "Read-only access to your profile, posts, friends, and followers",
 			Permissions: []TokenPermission{
 				PermViewProfile, PermViewCredits, PermViewFriends,
-				PermViewPosts, PermViewFollowing, PermViewFiles,
+				PermViewPosts, PermViewFollowing, PermViewFiles, PermViewStorage,
 				PermViewKeys, PermViewGroups, PermViewGroupMembers, PermViewNotifications,
 				PermViewGifts, PermViewItems, PermViewCosmetics, PermViewBlocked,
 			},
@@ -173,6 +179,7 @@ func PermissionGroups() []PermissionGroup {
 			Description: "Manage files and storage",
 			Permissions: []TokenPermission{
 				PermViewProfile, PermViewFiles, PermManageFiles, PermDeleteFiles,
+				PermViewStorage, PermManageStorage, PermDeleteStorage,
 			},
 		},
 		{

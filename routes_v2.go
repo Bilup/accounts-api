@@ -197,6 +197,16 @@ func setupV2Routes(r *gin.Engine) {
 		files.GET("/path-index", requiresAuth, requirePermission(PermViewFiles), getPathIndex)
 	}
 
+	storage := v2.Group("/storage")
+	{
+		storage.GET("", requiresAuth, requirePermission(PermViewStorage), listStorage)
+		storage.DELETE("", requiresAuth, requirePermission(PermDeleteStorage), clearStorage)
+		storage.GET("/usage", requiresAuth, requirePermission(PermViewStorage), getStorageUsage)
+		storage.GET("/:id", requiresAuth, requirePermission(PermViewStorage), getStorage)
+		storage.PUT("/:id", requiresAuth, requirePermission(PermManageStorage), setStorage)
+		storage.DELETE("/:id", requiresAuth, requirePermission(PermDeleteStorage), deleteStorage)
+	}
+
 	validators := v2.Group("/validators")
 	{
 		validators.POST("", requiresAuth, requirePermission(PermGenerateValidator), generateValidator)
