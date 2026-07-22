@@ -72,7 +72,7 @@ func createAccount(in AccountCreateInput) (User, error) {
 	})
 
 	newUser := User{
-		"username":         in.Username,
+		"username":         string(in.Username),
 		"pfp":              avatarURL(usernameLower),
 		"password":         "",
 		"email":            in.Email,

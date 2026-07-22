@@ -931,7 +931,7 @@ func updateUserAdmin(c *gin.Context) {
 				}
 				oldUsername := user.GetUsername()
 				updateUsername(oldUsername, username)
-				user.Set("username", username)
+				user.Set("username", string(username))
 			case "sys.currency":
 				user.SetBalance(value)
 			default:

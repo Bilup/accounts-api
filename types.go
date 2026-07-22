@@ -526,8 +526,11 @@ func (u User) GetUsername() Username {
 	mu.RLock()
 	defer mu.RUnlock()
 	if v, ok := u["username"]; ok {
-		if str, ok := v.(string); ok {
-			return Username(str)
+		switch s := v.(type) {
+		case string:
+			return Username(s)
+		case Username:
+			return s
 		}
 	}
 	return ""

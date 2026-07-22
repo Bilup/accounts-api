@@ -625,8 +625,11 @@ func savePfp(dataURI string, user *User) error {
 	if err := checkImageDimensions(imageData); err != nil {
 		return err
 	}
-	os.MkdirAll(avatarBaseDir, 0755)
 	username := user.GetUsername().ToLower()
+	if username == "" {
+		return fmt.Errorf("cannot save avatar: user has no username")
+	}
+	os.MkdirAll(avatarBaseDir, 0755)
 
 	contentType := "image/jpeg"
 	if strings.Contains(mimeHeader, "image/gif") {
@@ -946,6 +949,9 @@ func saveBanner(dataURI string, user *User) error {
 	}
 
 	username := user.GetUsername().ToLower()
+	if username == "" {
+		return fmt.Errorf("cannot save banner: user has no username")
+	}
 	os.MkdirAll(bannerBaseDir, 0755)
 	deleteBanners(username)
 
