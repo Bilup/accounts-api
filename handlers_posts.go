@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -69,6 +70,33 @@ var postLimits = map[string]int{
 	"content_length":         300,
 	"content_length_premium": 600,
 	"attachment_length":      200,
+	"os_detail_length":       64,
+}
+
+func validatePostOS(value string) (string, string) {
+	name, detail, hasDetail := strings.Cut(value, ":")
+	isValid, errorMessage, system := validateSystem(strings.TrimSpace(name))
+	if !isValid {
+		return "", errorMessage
+	}
+	if !hasDetail {
+		return system.Name, ""
+	}
+
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return system.Name, ""
+	}
+	if len(detail) > postLimits["os_detail_length"] {
+		return "", "OS detail exceeds " + strconv.Itoa(postLimits["os_detail_length"]) + " character limit"
+	}
+	for _, r := range detail {
+		if !unicode.IsPrint(r) {
+			return "", "OS detail contains invalid characters"
+		}
+	}
+
+	return system.Name + ": " + detail, ""
 }
 
 var mentionRe = regexp.MustCompile(`@([a-zA-Z0-9_.-]{1,30})`)
@@ -134,18 +162,12 @@ func createPost(c *gin.Context) {
 
 	osParam := c.Query("os")
 	if osParam != "" {
-		systems := getAllSystems()
-		keys := make([]string, len(systems))
-		i := 0
-		for k := range systems {
-			keys[i] = k
-			i++
-		}
-		isValid := slices.Contains(keys, osParam)
-		if !isValid {
-			c.JSON(400, gin.H{"error": "OS is invalid"})
+		normalized, errorMessage := validatePostOS(osParam)
+		if errorMessage != "" {
+			c.JSON(400, gin.H{"error": errorMessage})
 			return
 		}
+		osParam = normalized
 	}
 
 	chars := clawPostLimit(user)

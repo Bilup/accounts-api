@@ -33,7 +33,7 @@ func (c *Conn) readPump(ws *websocket.Conn) {
 		hub.unregister(c)
 		ws.Close()
 	}()
-	ws.SetReadLimit(4096)
+	ws.SetReadLimit(maxWSMessageBytes)
 	ws.SetReadDeadline(time.Now().Add(120 * time.Second))
 	ws.SetPongHandler(func(string) error {
 		ws.SetReadDeadline(time.Now().Add(120 * time.Second))
@@ -80,6 +80,10 @@ func (c *Conn) readPump(ws *websocket.Conn) {
 			c.handleRemoveActivity(msg)
 		case "room_state":
 			c.handleRoomState(msg)
+		case "gmsg":
+			c.handleGmsg(msg)
+		case "pmsg":
+			c.handlePmsg(msg)
 		case "ping":
 		default:
 			c.sendError("unknown command")

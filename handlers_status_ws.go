@@ -15,6 +15,7 @@ const (
 	maxActivitiesPerConn = 5
 	maxStatusLen         = 128
 	maxRoomNameLen       = 64
+	maxWSMessageBytes    = 64 * 1024
 )
 
 type Presence string
