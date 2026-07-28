@@ -1055,7 +1055,7 @@ func (u User) GetSubscription() subscription {
 				"title": "Lost Subscription",
 				"description": fmt.Sprintf("**User:** %s\n**Tier:** %s\n**Next Billing:** %s",
 					username, val.Tier, time.Unix(val.Next_billing/1000, 0).Format(time.RFC3339)),
-				"color":     0x57cdac,
+				"color":     0x75C1C4,
 				"timestamp": time.Now().Format(time.RFC3339),
 			},
 		})

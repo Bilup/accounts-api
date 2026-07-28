@@ -108,7 +108,7 @@ func vapidSubject() string {
 			return v
 		}
 	}
-	return "mailto:admin@rotur.dev"
+	return "mailto:support@bilup.org"
 }
 
 func getVAPIDKeys(c *gin.Context) {
@@ -119,7 +119,7 @@ func getVAPIDKeys(c *gin.Context) {
 		subject = os.Getenv("VAPID_SUBJECT")
 	}
 	if subject == "" {
-		subject = "mailto:admin@rotur.dev"
+		subject = "mailto:support@bilup.org"
 	}
 
 	c.JSON(200, gin.H{

@@ -58,13 +58,13 @@ func sendVerifyEmail(toEmail string, username string, token string) {
 		return
 	}
 	verifyURL := fmt.Sprintf("%s/verify_email?token=%s", strings.TrimRight(config.BASE_URL, "/"), token)
-	subject := "Verify your Rotur email"
+	subject := "Verify your Bilup Accounts email"
 	body := fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=\"utf-8\"\r\n\r\n"+
 			"<div style=\"font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;\">"+
-			"<h2 style=\"color:#57cdac;\">Welcome to Rotur, %s!</h2>"+
+			"<h2 style=\"color:#75C1C4;\">Welcome to Bilup Accounts, %s!</h2>"+
 			"<p>Please verify your email address to activate your account.</p>"+
-			"<a href=\"%s\" style=\"display:inline-block;padding:12px 24px;background:#57cdac;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold;\">Verify Email</a>"+
+			"<a href=\"%s\" style=\"display:inline-block;padding:12px 24px;background:#75C1C4;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold;\">Verify Email</a>"+
 			"<p>\"%s\"</p>"+
 			"<p style=\"color:#777;font-size:13px;margin-top:16px;\">If you did not create this account, you can ignore this email.</p>"+
 			"</div>",
@@ -85,14 +85,14 @@ func sendResetEmail(toEmail string, username Username, token string) {
 		log.Printf("[email] SMTP not configured, skipping reset email for %s", toEmail)
 		return
 	}
-	resetURL := fmt.Sprintf("%s/reset_password?token=%s", "https://rotur.dev", url.QueryEscape(token))
-	subject := "Reset your Rotur password"
+	resetURL := fmt.Sprintf("%s/reset_password?token=%s", "https://accounts.bilup.org", url.QueryEscape(token))
+	subject := "Reset your Bilup Accounts password"
 	body := fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=\"utf-8\"\r\n\r\n"+
 			"<div style=\"font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;\">"+
-			"<h2 style=\"color:#57cdac;\">Password Reset, %s</h2>"+
+			"<h2 style=\"color:#75C1C4;\">Password Reset, %s</h2>"+
 			"<p>We received a request to reset your password.</p>"+
-			"<a href=\"%s\" style=\"display:inline-block;padding:12px 24px;background:#57cdac;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold;\">Reset Password</a>"+
+			"<a href=\"%s\" style=\"display:inline-block;padding:12px 24px;background:#75C1C4;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold;\">Reset Password</a>"+
 			"<p>\"%s\"</p>"+
 			"<p style=\"color:#777;font-size:13px;margin-top:16px;\">This link expires in 1 hour. If you did not request a reset, ignore this email.</p>"+
 			"</div>",

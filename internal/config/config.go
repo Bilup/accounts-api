@@ -79,7 +79,7 @@ func Load() {
 	EVENT_SERVER_URL = MustEnv("EVENT_SERVER_URL", "")
 	BANNED_WORDS_URL = MustEnv("BANNED_WORDS_URL", "")
 
-	BASE_URL = MustEnv("BASE_URL", "https://api.rotur.dev")
+	BASE_URL = MustEnv("BASE_URL", "https://api.accounts.bilup.org")
 	SMTP_HOST = MustEnv("SMTP_HOST", "")
 	SMTP_PORT = MustEnv("SMTP_PORT", "587")
 	SMTP_USER = MustEnv("SMTP_USER", "")

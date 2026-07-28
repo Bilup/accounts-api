@@ -7,7 +7,7 @@ The `main` branch is actively maintained. Older tags may not receive security up
 Please DO NOT create a public GitHub issue for security problems.
 
 Instead:
-1. Email: security@rotur.dev (if available) or open a private advisory (GitHub Security Advisories).
+1. Email: support@bilup.org (if available) or open a private advisory (GitHub Security Advisories).
 2. Provide details: affected endpoints, reproduction steps, potential impact.
 3. Allow up to 72 hours for initial acknowledgement.
 

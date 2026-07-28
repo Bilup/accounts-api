@@ -99,7 +99,7 @@ func createGift(c *gin.Context) {
 		"tax":        taxAmount,
 		"total_paid": totalDeduction,
 		"expires_at": expiresAt,
-		"claim_url":  "https://rotur.dev/gift/" + giftCode,
+		"claim_url":  "https://accounts.bilup.org/gift/" + giftCode,
 	})
 }
 

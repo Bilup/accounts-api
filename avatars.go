@@ -95,11 +95,11 @@ func deleteUnderLock[K comparable, V any](mu *sync.RWMutex, m map[K]V, key K) {
 }
 
 func avatarURL[T ~string](username T) string {
-	return "https://avatars.rotur.dev/" + string(username)
+	return "https://avatars.bilup.org/" + string(username)
 }
 
 func bannerURL[T ~string](username T) string {
-	return "https://avatars.rotur.dev/.banners/" + string(username)
+	return "https://avatars.bilup.org/.banners/" + string(username)
 }
 
 func getUserTierCached(username Username) (string, bool) {
