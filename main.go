@@ -6,11 +6,62 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
 )
+
+func init() {
+	initDataFiles()
+}
+
+func initDataFiles() {
+	dirs := []string{
+		config.GROUPS_FILE_PATH,
+		config.USERDATA_PATH,
+		config.COSMETICS_ASSETS_PATH,
+	}
+
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("[init] Warning: Failed to create directory %s: %v", dir, err)
+		} else {
+			log.Printf("[init] Created directory %s", dir)
+		}
+	}
+
+	files := map[string]string{
+		config.DAILY_CLAIMS_FILE_PATH:  "[]",
+		config.USERS_FILE_PATH:         "[]",
+		config.DELETED_ACCOUNTS_PATH:   "{}",
+		config.LOCAL_POSTS_PATH:        "[]",
+		config.FOLLOWERS_FILE_PATH:     "{}",
+		config.ITEMS_FILE_PATH:         "[]",
+		config.KEYS_FILE_PATH:          "[]",
+		config.EVENTS_HISTORY_PATH:     "{}",
+		config.SYSTEMS_FILE_PATH:       "{}",
+		config.COSMETICS_FILE_PATH:     "[]",
+		filepath.Join("./rotur", "badges.json"): "[]",
+	}
+
+	for path, content := range files {
+		if info, err := os.Stat(path); os.IsNotExist(err) {
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				log.Printf("[init] Warning: Failed to create file %s: %v", path, err)
+			} else {
+				log.Printf("[init] Created file %s", path)
+			}
+		} else if info.Size() == 0 {
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				log.Printf("[init] Warning: Failed to fix empty file %s: %v", path, err)
+			} else {
+				log.Printf("[init] Fixed empty file %s", path)
+			}
+		}
+	}
+}
 
 func main() {
 	// Ensure environment variables are loaded before any handlers/config usage

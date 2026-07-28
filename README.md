@@ -1,3 +1,3 @@
-# api.rotur.dev
+# Bilup Accounts System API
 
-this is the centralised backend for all of rotur.
+Based on [Rotur](https://rotur.dev)
