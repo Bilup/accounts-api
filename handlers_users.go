@@ -1610,8 +1610,8 @@ func saveDailyClaims(claimsData map[Username]float64) {
 }
 
 func acceptTos(c *gin.Context) {
-	if c.GetHeader("Origin") != "https://rotur.dev" {
-		c.JSON(403, gin.H{"error": "This endpoint is only available on rotur.dev"})
+	if c.GetHeader("Origin") != "https://accounts.bilup.org" {
+		c.JSON(403, gin.H{"error": "This endpoint is only available on accounts.bilup.org"})
 		return
 	}
 
