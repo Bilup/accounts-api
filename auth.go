@@ -9,7 +9,7 @@ import (
 )
 
 var hardcodedAdmins = map[string]bool{
-	"mist": true,
+	"RyaninCn11": true,
 }
 
 func isHardcodedAdmin(username Username) bool {
