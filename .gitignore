@@ -7,6 +7,10 @@ gong/
 *.json
 *.json.migrated
 
+# OIDC signing key
+oidc_signing_key.pem
+*.pem
+
 # Data directories
 rotur/
 cosmetics/

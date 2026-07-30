@@ -392,6 +392,28 @@ func setupV1Routes(r *gin.Engine) {
 	r.GET("/badges", rateLimit("default"), requiresAuth, requirePermission(PermViewProfile), getBadges)
 	r.GET("/ai", rateLimit("ai"), requiresAuth, requirePermission(PermViewPosts), handleAI)
 	r.GET("/status", rateLimit("default"), getStatus)
+
+	// --- OIDC Provider 端点（根级别，确保 Forgejo 兼容） ---
+	r.GET("/.well-known/openid-configuration", oidcDiscovery)
+	r.GET("/.well-known/jwks.json", oidcJWKS)
+	r.GET("/oauth/authorize", oidcAuthorize)
+	r.POST("/oauth/consent", oidcConsent)
+	r.POST("/oauth/login", oidcLogin)
+	r.POST("/oauth/token", oidcToken)
+	r.GET("/oauth/userinfo", oidcUserinfo)
+
+	// --- OIDC 客户端管理（管理员） ---
+	oidcAdmin := r.Group("/admin/oidc")
+	oidcAdmin.Use(func(c *gin.Context) {
+		if !authenticateAdmin(c) {
+			c.Abort()
+			return
+		}
+		c.Next()
+	})
+	oidcAdmin.POST("/clients", createOIDCClient)
+	oidcAdmin.GET("/clients", listOIDCClientsHandler)
+	oidcAdmin.DELETE("/clients/:id", deleteOIDCClientHandler)
 }
 
 func setupAvatarRoutes(avatars *gin.Engine) {

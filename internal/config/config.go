@@ -38,6 +38,9 @@ var (
 	ADMIN_TOKEN                   string
 	PBKDF2_SALT                   string
 	PBKDF2_ITERATIONS             int
+	OIDC_ISSUER                   string
+	OIDC_CLIENTS_FILE             string
+	OIDC_SIGNING_KEY_FILE         string
 )
 
 func MustEnv(key string, def string) string {
@@ -95,6 +98,11 @@ func Load() {
 	ADMIN_TOKEN = MustEnv("ADMIN_TOKEN", "")
 	PBKDF2_SALT = MustEnv("PBKDF2_SALT", "")
 	PBKDF2_ITERATIONS = intEnv("PBKDF2_ITERATIONS", 600000)
+
+	// OIDC Provider 配置（OIDC_ISSUER 依赖 BASE_URL，须在其后）
+	OIDC_ISSUER = MustEnv("OIDC_ISSUER", BASE_URL)
+	OIDC_CLIENTS_FILE = MustEnv("OIDC_CLIENTS_FILE", "./oidc_clients.json")
+	OIDC_SIGNING_KEY_FILE = MustEnv("OIDC_SIGNING_KEY_FILE", "./oidc_signing_key.pem")
 }
 
 func init() {

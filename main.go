@@ -44,6 +44,7 @@ func initDataFiles() {
 		config.SYSTEMS_FILE_PATH:       "{}",
 		config.COSMETICS_FILE_PATH:     "[]",
 		filepath.Join("./rotur", "badges.json"): "[]",
+		config.OIDC_CLIENTS_FILE:       "[]",
 	}
 
 	for path, content := range files {
@@ -87,6 +88,8 @@ func main() {
 	go scheduleLoop()
 	loadCosmeticGifts()
 	buildSubTokenIndex()
+	loadOIDCClients()
+	initOIDCSigningKey()
 
 	if err := loadJSONBadges(); err != nil {
 		log.Printf("Warning: Failed to load badges.json: %v", err)
@@ -103,6 +106,7 @@ func main() {
 	go cleanUnverifiedAccounts()
 	go startStandingRecoveryChecker()
 	StartValidatorCleanup()
+	StartOIDCCleanup()
 
 	go func() {
 		sigCh := make(chan os.Signal, 1)
