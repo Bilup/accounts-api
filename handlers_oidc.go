@@ -142,14 +142,11 @@ func oidcAuthorize(c *gin.Context) {
 		returnTo += "?" + c.Request.URL.RawQuery
 	}
 
-	// 检测当前登录态：优先读 token（前端 /auth 登录页跳回时携带 ?token=），
-	// 其次复用 extractAuthKey（auth query / Authorization header / session cookie）。
+	// 检测登录态：只认 ?token=（前端 /auth 登录页跳回时携带），
+	// 不读 session cookie / auth query / Authorization header，避免 SSO 自动登录。
+	// 这样每次 OIDC 授权都会先跳到 /auth，让用户选择/确认账户（支持多账户场景）。
 	var currentUser *User
-	authKey := c.Query("token")
-	if authKey == "" {
-		authKey = extractAuthKey(c)
-	}
-	if authKey != "" {
+	if authKey := c.Query("token"); authKey != "" {
 		user, _ := authenticateAnyKey(authKey)
 		currentUser = user
 	}
