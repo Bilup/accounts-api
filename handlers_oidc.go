@@ -1,7 +1,6 @@
 package main
 
 import (
-	"html"
 	"net/http"
 	"net/url"
 	"strings"
@@ -50,32 +49,24 @@ func scopeDescription(scope string) string {
 	return strings.Join(parts, "、")
 }
 
-// oidcRedirectError 向客户端回调 URL 返回 OAuth 错误。
-func oidcRedirectError(c *gin.Context, redirectURI, errCode, state string) {
-	q := url.Values{}
-	q.Set("error", errCode)
-	if state != "" {
-		q.Set("state", state)
-	}
-	c.Redirect(http.StatusFound, redirectURI+"?"+q.Encode())
-}
-
-// userPassesLoginGate 复用现有登录门禁检查（封禁/邮箱验证/TOS）。
-// 返回 true 表示通过，false 表示已在响应中拒绝。
-func userPassesLoginGate(c *gin.Context, user *User) bool {
+// loginGateError 返回登录门禁错误码（空字符串表示通过）。
+// 返回的是稳定错误 ID，前端据此做国际化展示。复用现有登录门禁检查（封禁/邮箱验证/TOS）。
+func loginGateError(user *User) string {
 	if user.IsBanned() {
-		c.JSON(http.StatusForbidden, gin.H{"error": "User is banned"})
-		return false
+		return "account_banned"
 	}
 	if user.Get("sys.email_verified") != true {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Email address not verified"})
-		return false
+		return "email_not_verified"
 	}
 	if user.Get("sys.tos_accepted") != true {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Terms of Service not accepted"})
-		return false
+		return "tos_not_accepted"
 	}
-	return true
+	return ""
+}
+
+// buildCallbackURL 构造带 query 的客户端回调 URL（用于授权确认后返回给前端跳转）。
+func buildCallbackURL(redirectURI string, params url.Values) string {
+	return redirectURI + "?" + params.Encode()
 }
 
 // --- 1. 发现端点 ---
@@ -110,6 +101,10 @@ func oidcJWKS(c *gin.Context) {
 
 // --- 3. 授权端点 ---
 
+// oidcAuthorize 处理授权请求：未登录则 302 重定向到前端登录页（accounts.bilup.org/auth），
+// 已登录则 302 重定向到前端授权确认页（accounts.bilup.org/consent）。
+// 前端登录页登录成功后会带 ?token=<登录token> 跳回本端点，据此识别登录态；
+// 授权确认页通过 /oauth/consent_info 与 /oauth/consent 完成交互。
 func oidcAuthorize(c *gin.Context) {
 	clientID := c.Query("client_id")
 	redirectURI := c.Query("redirect_uri")
@@ -141,25 +136,44 @@ func oidcAuthorize(c *gin.Context) {
 		return
 	}
 
-	// 检测当前登录态（复用 session cookie / auth key 机制）
+	// 构造完整的 authorize URL，供登录后回跳
+	returnTo := config.OIDC_ISSUER + c.Request.URL.Path
+	if c.Request.URL.RawQuery != "" {
+		returnTo += "?" + c.Request.URL.RawQuery
+	}
+
+	// 检测当前登录态：优先读 token（前端 /auth 登录页跳回时携带 ?token=），
+	// 其次复用 extractAuthKey（auth query / Authorization header / session cookie）。
 	var currentUser *User
-	if key := extractAuthKey(c); key != "" {
-		user, _ := authenticateAnyKey(key)
+	authKey := c.Query("token")
+	if authKey == "" {
+		authKey = extractAuthKey(c)
+	}
+	if authKey != "" {
+		user, _ := authenticateAnyKey(authKey)
 		currentUser = user
 	}
 
-	// 未登录 → 渲染登录页
+	// 未登录 → 重定向到前端登录页 accounts.bilup.org/auth?return_to=...
+	// 前端登录成功后会跳回 return_to 并附上 ?token=<登录token>
 	if currentUser == nil {
-		renderOIDCLogin(c, c.Request.URL.String())
+		q := url.Values{}
+		q.Set("return_to", returnTo)
+		c.Redirect(http.StatusFound, config.OIDC_FRONTEND_URL+"/auth?"+q.Encode())
 		return
 	}
 
-	// 已登录但未通过门禁 → 提示
-	if !userPassesLoginGate(c, currentUser) {
+	// 已登录但未通过门禁（封禁/邮箱未验证/TOS 未接受）→ 重定向到前端登录页并附带错误码
+	// error 为稳定错误 ID，前端据此做国际化展示
+	if errCode := loginGateError(currentUser); errCode != "" {
+		q := url.Values{}
+		q.Set("return_to", returnTo)
+		q.Set("error", errCode)
+		c.Redirect(http.StatusFound, config.OIDC_FRONTEND_URL+"/auth?"+q.Encode())
 		return
 	}
 
-	// 已登录且通过门禁 → 生成待确认授权，渲染授权确认页
+	// 已登录且通过门禁 → 生成待确认授权，重定向到前端授权确认页
 	consentID := randomToken(16)
 	storePendingConsent(pendingConsent{
 		consentID:           consentID,
@@ -174,32 +188,69 @@ func oidcAuthorize(c *gin.Context) {
 		codeChallengeMethod: codeChallengeMethod,
 		createdAt:           time.Now(),
 	})
-	renderOIDCConsent(c, client.ClientName, scope, consentID)
+	q := url.Values{}
+	q.Set("consent_id", consentID)
+	c.Redirect(http.StatusFound, config.OIDC_FRONTEND_URL+"/consent?"+q.Encode())
 }
 
-// --- 4. 授权确认处理 ---
+// --- 4. 授权确认信息（GET，供前端展示） ---
 
+// oidcConsentInfo 返回待确认授权的详情（应用名、scope 等），不消费该授权。
+func oidcConsentInfo(c *gin.Context) {
+	consentID := c.Query("consent_id")
+	if consentID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "consent_id is required"})
+		return
+	}
+	pending, ok := peekPendingConsent(consentID)
+	if !ok || time.Since(pending.createdAt) > oidcPendingConsentTTL {
+		c.JSON(http.StatusNotFound, gin.H{"error": "consent session expired or invalid"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"consent_id":        pending.consentID,
+		"client_name":       pending.clientName,
+		"scope":             pending.scope,
+		"scope_description": scopeDescription(pending.scope),
+	})
+}
+
+// --- 5. 授权确认处理（POST JSON） ---
+
+// oidcConsent 处理前端的授权确认请求，返回最终应跳转的回调 URL。
+// 前端拿到 redirect 后执行 window.location.href = redirect 完成回跳。
 func oidcConsent(c *gin.Context) {
-	consentID := c.PostForm("consent_id")
-	action := c.PostForm("action")
+	var req struct {
+		ConsentID string `json:"consent_id"`
+		Action    string `json:"action"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if req.ConsentID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "consent_id is required"})
+		return
+	}
 
-	pending, ok := consumePendingConsent(consentID)
+	pending, ok := consumePendingConsent(req.ConsentID)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant", "error_description": "consent session expired or invalid"})
 		return
 	}
 
-	if time.Since(pending.createdAt) > oidcPendingConsentTTL {
-		oidcRedirectError(c, pending.redirectURI, "access_denied", pending.state)
+	// 过期或拒绝 → 返回带 error 的回调 URL
+	if time.Since(pending.createdAt) > oidcPendingConsentTTL || req.Action != "approve" {
+		params := url.Values{}
+		params.Set("error", "access_denied")
+		if pending.state != "" {
+			params.Set("state", pending.state)
+		}
+		c.JSON(http.StatusOK, gin.H{"redirect": buildCallbackURL(pending.redirectURI, params)})
 		return
 	}
 
-	if action != "approve" {
-		oidcRedirectError(c, pending.redirectURI, "access_denied", pending.state)
-		return
-	}
-
-	// 生成授权码
+	// 批准 → 生成授权码，返回带 code 的回调 URL
 	code := randomToken(16)
 	storeAuthCode(authCodeEntry{
 		code:                code,
@@ -213,55 +264,12 @@ func oidcConsent(c *gin.Context) {
 		createdAt:           time.Now(),
 	})
 
-	q := url.Values{}
-	q.Set("code", code)
+	params := url.Values{}
+	params.Set("code", code)
 	if pending.state != "" {
-		q.Set("state", pending.state)
+		params.Set("state", pending.state)
 	}
-	c.Redirect(http.StatusFound, pending.redirectURI+"?"+q.Encode())
-}
-
-// --- 5. OIDC 登录 ---
-
-func oidcLogin(c *gin.Context) {
-	username := c.PostForm("username")
-	password := c.PostForm("password")
-	returnTo := c.PostForm("return_to")
-
-	if username == "" || password == "" {
-		renderOIDCLogin(c, returnTo)
-		return
-	}
-
-	user, err := findAccountByLogin(username, password)
-	if err != nil || len(user) == 0 {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, oidcLoginPageHTML(returnTo, "用户名或密码错误"))
-		return
-	}
-	if user.IsBanned() {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, oidcLoginPageHTML(returnTo, "账号已被封禁"))
-		return
-	}
-	if user.Get("sys.email_verified") != true {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, oidcLoginPageHTML(returnTo, "邮箱未验证，请先验证邮箱"))
-		return
-	}
-	if user.Get("sys.tos_accepted") != true {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, oidcLoginPageHTML(returnTo, "请先接受服务条款"))
-		return
-	}
-
-	// 设置 session cookie（复用 v2 机制）
-	v2SetSessionCookie(c, user.GetKey())
-
-	if returnTo == "" {
-		returnTo = config.OIDC_ISSUER
-	}
-	c.Redirect(http.StatusFound, returnTo)
+	c.JSON(http.StatusOK, gin.H{"redirect": buildCallbackURL(pending.redirectURI, params)})
 }
 
 // --- 6. 令牌端点 ---
@@ -385,7 +393,7 @@ func oidcToken(c *gin.Context) {
 	})
 }
 
-// --- 7. 用户信息端点 ---
+// --- 8. 用户信息端点 ---
 
 func oidcUserinfo(c *gin.Context) {
 	accessToken := stripBearer(c.GetHeader("Authorization"))
@@ -472,71 +480,4 @@ func deleteOIDCClientHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "client deleted"})
-}
-
-// --- HTML 页面 ---
-
-func renderOIDCLogin(c *gin.Context, returnTo string) {
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.String(http.StatusOK, oidcLoginPageHTML(returnTo, ""))
-}
-
-func renderOIDCConsent(c *gin.Context, clientName, scope, consentID string) {
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.String(http.StatusOK, oidcConsentPageHTML(clientName, scope, consentID))
-}
-
-func oidcLoginPageHTML(returnTo, errMsg string) string {
-	escReturn := html.EscapeString(returnTo)
-	escErr := html.EscapeString(errMsg)
-	errBlock := ""
-	if escErr != "" {
-		errBlock = `<p style="color:#e53935;font-size:14px;margin:8px 0">` + escErr + `</p>`
-	}
-	return `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录 - Bilup Accounts</title>
-<style>body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
-.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:32px;width:320px}
-h1{font-size:20px;margin:0 0 8px}
-label{display:block;font-size:13px;margin:12px 0 4px;color:#8b949e}
-input{width:100%;box-sizing:border-box;padding:8px;border-radius:6px;border:1px solid #30363d;background:#0d1117;color:#e6edf3;font-size:14px}
-button{width:100%;margin-top:16px;padding:10px;border:none;border-radius:6px;background:#238636;color:#fff;font-size:14px;cursor:pointer}
-button:hover{background:#2ea043}
-</style></head><body><form class="card" method="POST" action="/oauth/login">
-<h1>登录 Bilup Accounts</h1>
-<p style="font-size:13px;color:#8b949e;margin:0">请登录以继续授权流程</p>
-` + errBlock + `
-<input type="hidden" name="return_to" value="` + escReturn + `">
-<label>用户名</label><input name="username" autocomplete="username" required autofocus>
-<label>密码</label><input name="password" type="password" autocomplete="current-password" required>
-<button type="submit">登录</button>
-</form></body></html>`
-}
-
-func oidcConsentPageHTML(clientName, scope, consentID string) string {
-	escName := html.EscapeString(clientName)
-	escScope := html.EscapeString(scope)
-	desc := html.EscapeString(scopeDescription(scope))
-	return `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>授权 - Bilup Accounts</title>
-<style>body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
-.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:32px;width:380px;text-align:center}
-h1{font-size:20px;margin:0 0 8px}
-p{font-size:14px;color:#8b949e;line-height:1.6}
-.scopes{text-align:left;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;margin:16px 0;font-size:13px}
-.app{color:#58a6ff;font-weight:600}
-button{width:48%;padding:10px;border:none;border-radius:6px;font-size:14px;cursor:pointer;margin:4px}
-.approve{background:#238636;color:#fff}.approve:hover{background:#2ea043}
-.deny{background:#21262d;color:#e6edf3;border:1px solid #30363d}.deny:hover{background:#30363d}
-.row{display:flex;justify-content:space-between;margin-top:16px}
-</style></head><body><form class="card" method="POST" action="/oauth/consent">
-<input type="hidden" name="consent_id" value="` + html.EscapeString(consentID) + `">
-<input type="hidden" name="scope" value="` + escScope + `">
-<h1>授权请求</h1>
-<p>应用 <span class="app">` + escName + `</span> 请求访问你的 Bilup 账号信息：</p>
-<div class="scopes">` + desc + `</div>
-<p style="font-size:12px">授权后该应用将能够读取上述信息。你可随时撤销授权。</p>
-<div class="row">
-<button class="deny" type="submit" name="action" value="deny">拒绝</button>
-<button class="approve" type="submit" name="action" value="approve">授权</button>
-</div>
-</form></body></html>`
 }

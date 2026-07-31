@@ -397,8 +397,8 @@ func setupV1Routes(r *gin.Engine) {
 	r.GET("/.well-known/openid-configuration", oidcDiscovery)
 	r.GET("/.well-known/jwks.json", oidcJWKS)
 	r.GET("/oauth/authorize", oidcAuthorize)
+	r.GET("/oauth/consent_info", oidcConsentInfo)
 	r.POST("/oauth/consent", oidcConsent)
-	r.POST("/oauth/login", oidcLogin)
 	r.POST("/oauth/token", oidcToken)
 	r.GET("/oauth/userinfo", oidcUserinfo)
 

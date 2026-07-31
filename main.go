@@ -124,7 +124,9 @@ func main() {
 	v1CORS := corsMiddleware()
 	v2CORS := v2CORSMiddleware()
 	r.Use(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/v2") {
+		path := c.Request.URL.Path
+		// /v2 与 /oauth 路径需要支持凭证（cookie）的跨域请求，使用 v2CORS
+		if strings.HasPrefix(path, "/v2") || strings.HasPrefix(path, "/oauth") {
 			v2CORS(c)
 			return
 		}

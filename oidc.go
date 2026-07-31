@@ -244,6 +244,14 @@ func consumePendingConsent(consentID string) (pendingConsent, bool) {
 	return entry, ok
 }
 
+// peekPendingConsent 非消费式查询待确认授权（供前端展示授权信息）。
+func peekPendingConsent(consentID string) (pendingConsent, bool) {
+	oidcStateMutex.RLock()
+	defer oidcStateMutex.RUnlock()
+	entry, ok := oidcPendingConsents[consentID]
+	return entry, ok
+}
+
 // --- 随机 token 生成 ---
 
 func randomToken(byteLen int) string {

@@ -41,6 +41,7 @@ var (
 	OIDC_ISSUER                   string
 	OIDC_CLIENTS_FILE             string
 	OIDC_SIGNING_KEY_FILE         string
+	OIDC_FRONTEND_URL             string
 )
 
 func MustEnv(key string, def string) string {
@@ -103,6 +104,7 @@ func Load() {
 	OIDC_ISSUER = MustEnv("OIDC_ISSUER", BASE_URL)
 	OIDC_CLIENTS_FILE = MustEnv("OIDC_CLIENTS_FILE", "./oidc_clients.json")
 	OIDC_SIGNING_KEY_FILE = MustEnv("OIDC_SIGNING_KEY_FILE", "./oidc_signing_key.pem")
+	OIDC_FRONTEND_URL = MustEnv("OIDC_FRONTEND_URL", "https://accounts.bilup.org")
 }
 
 func init() {
