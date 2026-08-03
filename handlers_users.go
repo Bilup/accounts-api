@@ -527,8 +527,8 @@ func registerUser(c *gin.Context) {
 		return
 	}
 
-	if !captcha.VerifyHCaptcha(req.Captcha) {
-		c.JSON(400, gin.H{"error": "hCaptcha verification failed"})
+	if !captcha.VerifyTurnstile(req.Captcha) {
+		c.JSON(400, gin.H{"error": "CAPTCHA verification failed"})
 		return
 	}
 
