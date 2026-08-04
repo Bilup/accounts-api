@@ -1222,6 +1222,17 @@ func transferCredits(c *gin.Context) {
 func deleteUser(c *gin.Context) {
 	user := currentUser(c)
 
+	var req struct {
+		Captcha string `json:"captcha"`
+	}
+	if !bindJSON(c, &req) {
+		return
+	}
+	if !captcha.VerifyTurnstile(req.Captcha) {
+		c.JSON(400, gin.H{"error": "CAPTCHA verification failed"})
+		return
+	}
+
 	username := Username(c.Param("username"))
 	if !requireField(c, username, "Username is required") {
 		return

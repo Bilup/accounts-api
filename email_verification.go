@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claw/internal/captcha"
 	"claw/internal/config"
 	"crypto/rand"
 	"encoding/base64"
@@ -221,9 +222,14 @@ func changePasswordHandler(c *gin.Context) {
 
 func requestPasswordResetHandler(c *gin.Context) {
 	var req struct {
-		Email string `json:"email"`
+		Email   string `json:"email"`
+		Captcha string `json:"captcha"`
 	}
 	if !bindJSON(c, &req) {
+		return
+	}
+	if !captcha.VerifyTurnstile(req.Captcha) {
+		c.JSON(400, gin.H{"error": "CAPTCHA verification failed"})
 		return
 	}
 	email := strings.TrimSpace(req.Email)
