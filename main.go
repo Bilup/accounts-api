@@ -45,6 +45,8 @@ func initDataFiles() {
 		config.COSMETICS_FILE_PATH:     "[]",
 		filepath.Join("./rotur", "badges.json"): "[]",
 		config.OIDC_CLIENTS_FILE:       "[]",
+		config.AFDIAN_PLANS_FILE:       `{"plans":{},"skus":{},"days_per_month":31}`,
+		config.AFDIAN_ORDERS_FILE:      "{}",
 	}
 
 	for path, content := range files {
@@ -90,6 +92,9 @@ func main() {
 	buildSubTokenIndex()
 	loadOIDCClients()
 	initOIDCSigningKey()
+	loadAfdianPlans()
+	loadAfdianOrders()
+	initAfdianPublicKey()
 
 	if err := loadJSONBadges(); err != nil {
 		log.Printf("Warning: Failed to load badges.json: %v", err)
@@ -107,6 +112,7 @@ func main() {
 	go startStandingRecoveryChecker()
 	StartValidatorCleanup()
 	StartOIDCCleanup()
+	go watchAfdianPlansFile()
 
 	go func() {
 		sigCh := make(chan os.Signal, 1)

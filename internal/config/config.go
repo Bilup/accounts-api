@@ -42,6 +42,9 @@ var (
 	OIDC_CLIENTS_FILE             string
 	OIDC_SIGNING_KEY_FILE         string
 	OIDC_FRONTEND_URL             string
+	AFDIAN_USER_ID                string
+	AFDIAN_PLANS_FILE             string
+	AFDIAN_ORDERS_FILE            string
 )
 
 func MustEnv(key string, def string) string {
@@ -105,6 +108,11 @@ func Load() {
 	OIDC_CLIENTS_FILE = MustEnv("OIDC_CLIENTS_FILE", "./oidc_clients.json")
 	OIDC_SIGNING_KEY_FILE = MustEnv("OIDC_SIGNING_KEY_FILE", "./oidc_signing_key.pem")
 	OIDC_FRONTEND_URL = MustEnv("OIDC_FRONTEND_URL", "https://accounts.bilup.org")
+
+	// 爱发电（Afdian）配置
+	AFDIAN_USER_ID = MustEnv("AFDIAN_USER_ID", "")
+	AFDIAN_PLANS_FILE = MustEnv("AFDIAN_PLANS_FILE", "./afdian_plans.json")
+	AFDIAN_ORDERS_FILE = MustEnv("AFDIAN_ORDERS_FILE", "./afdian_processed_orders.json")
 }
 
 func init() {

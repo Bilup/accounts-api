@@ -118,7 +118,7 @@ func setupV1Routes(r *gin.Engine) {
 		admin.POST("/delete_user", deleteUserAdmin)
 		admin.POST("/ban_user", banUserAdmin)
 		admin.POST("/transfer_credits", transferCreditsAdmin)
-		admin.POST("/kofi", handleKofiTransaction)
+		admin.POST("/afdian", handleAfdianWebhook)
 		admin.POST("/set_sub", setSubscription)
 		admin.POST("/set_standing", setStandingAdmin)
 		admin.POST("/get_standing_history", getStandingHistoryAdmin)

@@ -506,6 +506,7 @@ func flushAll() {
 	saveReports()
 	saveEventsHistory()
 	saveCosmeticGifts()
+	saveAfdianOrders()
 }
 
 func watchFile(path string, reload func()) {
