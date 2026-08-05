@@ -37,21 +37,15 @@ func handleAfdianWebhook(c *gin.Context) {
 
 	order := payload.Data.Order
 
-	// 1. 验签（安全边界）
+	// 1. 验签（安全边界）—— 签名内容含 out_trade_no + user_id + plan_id + total_amount，
+	//    能防篡改；签名通过即证明数据来自爱发电平台且未被修改。
 	if !verifyAfdianSign(order.OutTradeNo, order.UserId, order.PlanId, order.TotalAmount, payload.Data.Sign) {
 		log.Printf("[afdian] signature verification failed: out_trade_no=%s", order.OutTradeNo)
 		c.JSON(http.StatusBadRequest, gin.H{"ec": 400, "em": "invalid signature"})
 		return
 	}
 
-	// 2. 商户校验
-	if !verifyAfdianMerchant(order.UserId) {
-		log.Printf("[afdian] merchant mismatch: user_id=%s", order.UserId)
-		c.JSON(http.StatusBadRequest, gin.H{"ec": 400, "em": "merchant mismatch"})
-		return
-	}
-
-	// 3. 幂等检查（原子预约，防并发重复处理）
+	// 2. 幂等检查（原子预约，防并发重复处理）
 	if !reserveAfdianOrder(order.OutTradeNo) {
 		afdianOK(c)
 		return

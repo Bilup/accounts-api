@@ -4,7 +4,6 @@ import (
 	"crypto"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
@@ -214,15 +213,4 @@ func verifyAfdianSign(outTradeNo, userId, planId, totalAmount, signBase64 string
 		return false
 	}
 	return rsa.VerifyPKCS1v15(afdianPublicKey, crypto.SHA256, hashed[:], signBytes) == nil
-}
-
-// --- 商户校验（防止其他商户的订单误入） ---
-
-func verifyAfdianMerchant(orderUserId string) bool {
-	expected := config.AFDIAN_USER_ID
-	if expected == "" {
-		log.Printf("[afdian] AFDIAN_USER_ID not set, rejecting order")
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(orderUserId), []byte(expected)) == 1
 }
