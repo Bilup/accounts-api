@@ -363,7 +363,7 @@ func setupV2Routes(r *gin.Engine) {
 		admin.POST("/users/delete", deleteUserAdmin)
 		admin.POST("/users/ban", banUserAdmin)
 		admin.POST("/credits/transfer", transferCreditsAdmin)
-		admin.POST("/afdian", handleAfdianWebhook)
+		admin.POST("/gifts/batch", batchCreateGifts)
 		admin.POST("/subscriptions", setSubscription)
 		admin.POST("/standing", setStandingAdmin)
 		admin.POST("/standing/history", getStandingHistoryAdmin)

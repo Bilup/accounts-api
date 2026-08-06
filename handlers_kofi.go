@@ -7,7 +7,7 @@ import (
 )
 
 // applySubscriptionToUser 写入 sys.subscription 并尝试同步 LITE_SUBSCRIPTION_KEY。
-// admin 端点和爱发电 webhook 共用此函数。注意：setKeyNextBilling 在 LITE_SUBSCRIPTION_KEY
+// admin 端点和礼包码兑换共用此函数。注意：setKeyNextBilling 在 LITE_SUBSCRIPTION_KEY
 // 不在 keys 列表或用户未加入该 key 时返回 false，此时仅 sys.subscription 生效。
 func applySubscriptionToUser(user User, tier string, nextBilling int64) bool {
 	user.SetSubscription(subscription{

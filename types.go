@@ -1534,6 +1534,16 @@ type Gift struct {
 	ClaimedAt   *int64  `json:"claimed_at,omitempty"`
 	ClaimedBy   *UserId `json:"claimed_by,omitempty"`
 	CancelledAt *int64  `json:"cancelled_at,omitempty"`
+	// 扩展字段：支持订阅类型礼包码
+	Type       string `json:"type,omitempty"`        // "credits"（默认/空）或 "subscription"
+	Tier       string `json:"tier,omitempty"`        // 订阅等级（如 "Plus", "Pro"），仅 type=="subscription"
+	DurationMs int64  `json:"duration_ms,omitempty"` // 订阅时长（毫秒），仅 type=="subscription"
+}
+
+// IsSubscription 判断是否为订阅类型礼包码。
+// 空Type视为积分类型（向后兼容旧数据）。
+func (g Gift) IsSubscription() bool {
+	return g.Type == "subscription"
 }
 
 func (g Gift) ToNet() GiftNet {
@@ -1556,16 +1566,22 @@ func (g Gift) ToNet() GiftNet {
 		ExpiresAt: g.ExpiresAt,
 		ClaimedAt: claimedAt,
 		ClaimedBy: claimedBy,
+		Type:      g.Type,
+		Tier:      g.Tier,
+		DurationMs: g.DurationMs,
 	}
 }
 
 func (g Gift) ToPublic() GiftPublic {
 	return GiftPublic{
-		Code:      g.Code,
-		Amount:    g.Amount,
-		Note:      g.Note,
-		CreatorId: getUserById(g.CreatorId).GetUsername(),
-		ExpiresAt: g.ExpiresAt,
+		Code:       g.Code,
+		Amount:     g.Amount,
+		Note:       g.Note,
+		CreatorId:  getUserById(g.CreatorId).GetUsername(),
+		ExpiresAt:  g.ExpiresAt,
+		Type:       g.Type,
+		Tier:       g.Tier,
+		DurationMs: g.DurationMs,
 	}
 }
 
@@ -1589,23 +1605,29 @@ func (g Gift) CanBeCancelled() bool {
 }
 
 type GiftNet struct {
-	Id        string    `json:"id"`
-	Code      string    `json:"code"`
-	Amount    float64   `json:"amount"`
-	Note      string    `json:"note"`
-	CreatorId Username  `json:"creator_id"`
-	CreatedAt int64     `json:"created_at"`
-	ExpiresAt int64     `json:"expires_at"`
-	ClaimedAt *int64    `json:"claimed_at,omitempty"`
-	ClaimedBy *Username `json:"claimed_by,omitempty"`
+	Id         string    `json:"id"`
+	Code       string    `json:"code"`
+	Amount     float64   `json:"amount"`
+	Note       string    `json:"note"`
+	CreatorId  Username  `json:"creator_id"`
+	CreatedAt  int64     `json:"created_at"`
+	ExpiresAt  int64     `json:"expires_at"`
+	ClaimedAt  *int64    `json:"claimed_at,omitempty"`
+	ClaimedBy  *Username `json:"claimed_by,omitempty"`
+	Type       string    `json:"type,omitempty"`
+	Tier       string    `json:"tier,omitempty"`
+	DurationMs int64     `json:"duration_ms,omitempty"`
 }
 
 type GiftPublic struct {
-	Code      string   `json:"code"`
-	Amount    float64  `json:"amount"`
-	Note      string   `json:"note"`
-	CreatorId Username `json:"creator_id"`
-	ExpiresAt int64    `json:"expires_at"`
+	Code       string   `json:"code"`
+	Amount     float64  `json:"amount"`
+	Note       string   `json:"note"`
+	CreatorId  Username `json:"creator_id"`
+	ExpiresAt  int64    `json:"expires_at"`
+	Type       string   `json:"type,omitempty"`
+	Tier       string   `json:"tier,omitempty"`
+	DurationMs int64    `json:"duration_ms,omitempty"`
 }
 
 type CosmeticGift struct {
