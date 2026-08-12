@@ -1527,23 +1527,36 @@ func renameUserAvatar(oldUsername, newUsername Username) {
 
 var dailyClaimMutex sync.Mutex
 
-func canClaimDaily(user *User) float64 {
-	username := user.GetUsername().ToLower()
-
+// nextClaimDeadline returns the Unix timestamp (seconds) of the next allowed
+// claim time, which is 00:00 Beijing time (UTC+8) of the day after the last
+// claim. Returns 0 when the user has never claimed, meaning a claim is
+// immediately allowed.
+func nextClaimDeadline(username Username) float64 {
 	claimsData := loadDailyClaims()
-
-	nextClaimTime, ok := claimsData[username]
-	if !ok || nextClaimTime == 0 {
+	lastClaim, ok := claimsData[username]
+	if !ok || lastClaim == 0 {
 		return 0
 	}
 
-	currentTime := float64(time.Now().Unix())
-
-	elapsed := currentTime - nextClaimTime
-	if elapsed < 86400 {
-		return 86400 - elapsed
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("CST", 8*3600)
 	}
+	last := time.Unix(int64(lastClaim), 0).In(loc)
+	nextMidnight := time.Date(last.Year(), last.Month(), last.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, 1)
+	return float64(nextMidnight.Unix())
+}
 
+func canClaimDaily(user *User) float64 {
+	username := user.GetUsername().ToLower()
+	deadline := nextClaimDeadline(username)
+	if deadline == 0 {
+		return 0
+	}
+	wait := deadline - float64(time.Now().Unix())
+	if wait > 0 {
+		return wait
+	}
 	return 0
 }
 
@@ -1552,24 +1565,19 @@ func timeUntilNextClaim(c *gin.Context) {
 
 	username := user.GetUsername().ToLower()
 
-	claimsData := loadDailyClaims()
-
-	nextClaimTime, ok := claimsData[username]
-	if !ok {
-		c.JSON(400, gin.H{"error": "No daily claim found"})
-		return
+	deadline := nextClaimDeadline(username)
+	now := float64(time.Now().Unix())
+	wait := deadline - now
+	if wait < 0 {
+		wait = 0
 	}
 
-	currentTime := float64(time.Now().Unix())
-
-	elapsed := currentTime - nextClaimTime
-	if elapsed < 86400 {
-		waitTime := 86400 - elapsed
-		c.JSON(200, gin.H{"wait_time": waitTime})
-		return
-	}
-
-	c.JSON(200, gin.H{"wait_time": 0})
+	c.JSON(200, gin.H{
+		"wait_time":  wait,
+		"next_claim": deadline,
+		"reward":     CalculateDailyReward(beijingNow()),
+		"can_claim":  wait <= 0,
+	})
 }
 
 func claimDaily(c *gin.Context) {
@@ -1588,17 +1596,35 @@ func claimDaily(c *gin.Context) {
 	}
 
 	claimsData := loadDailyClaims()
-	currentTime := float64(time.Now().Unix())
-	claimsData[username] = currentTime
+	claimsData[username] = float64(time.Now().Unix())
 	saveDailyClaims(claimsData)
 
-	benefits := user.GetSubscriptionBenefits()
+	// Compute reward per the daily sign-in rules defined in 登录机制.md,
+	// then multiply by subscription tier for paid subscribers.
+	breakdown := CalculateDailyReward(beijingNow())
+	tierMultiplier := user.GetSubscriptionBenefits().Daily_Credit_Multipler
+	if tierMultiplier < 1 {
+		tierMultiplier = 1
+	}
+	baseAmount := breakdown.Total
+	totalAmount := float64(baseAmount) * float64(tierMultiplier)
 
-	PerformCreditTransfer("rotur", username, float64(benefits.Daily_Credit_Multipler), "Daily claim")
+	if totalAmount > 0 {
+		note := fmt.Sprintf("每日签到 +%d", baseAmount)
+		if breakdown.SpecialReason != "" {
+			note = fmt.Sprintf("每日签到 +%d（含%s）", baseAmount, breakdown.SpecialReason)
+		}
+		PerformCreditTransfer("rotur", username, totalAmount, note)
+	}
 
 	saveUsers()
 
-	c.JSON(200, gin.H{"message": "Daily claim successful"})
+	c.JSON(200, gin.H{
+		"message":         "Daily claim successful",
+		"reward":          breakdown,
+		"tier_multiplier": tierMultiplier,
+		"amount":          totalAmount,
+	})
 }
 
 // loadDailyClaims loads daily claims data from rotur_daily.json
