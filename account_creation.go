@@ -4,6 +4,7 @@ import (
 	"claw/internal/config"
 	"crypto/sha256"
 	"fmt"
+	"log"
 	"maps"
 	"strings"
 	"time"
@@ -136,4 +137,67 @@ func createAccount(in AccountCreateInput) (User, error) {
 	idToUserMutex.Unlock()
 	saveUser(newId)
 	return newUser, nil
+}
+
+// ensureSystemAccounts creates the built-in system accounts that the credit
+// economy relies on ("rotur" as the mint for sign-in / gift / escrow credits,
+// "mist" as the default tax recipient) whenever they are missing from the
+// store. It is safe to call on every startup.
+func ensureSystemAccounts() {
+	ensureSystemAccount(Username("rotur"))
+	ensureSystemAccount(Username("mist"))
+}
+
+// ensureSystemAccount creates a single built-in system account if it does not
+// already exist. These accounts use an unusable (empty) password and a
+// reserved .local email so they cannot be logged into or re-registered.
+func ensureSystemAccount(username Username) {
+	name := username.ToLower()
+	if _, err := getAccountByUsername(name); err == nil {
+		return
+	}
+
+	newUser := User{
+		"username":              string(username),
+		"email":                 string(username) + "@system.local",
+		"password":              "",
+		"key":                   generateAccountToken(),
+		"system":                "rotur",
+		"max_size":              5000000,
+		"sys.last_login":        time.Now().UnixMilli(),
+		"sys.total_logins":      0,
+		"sys.friends":           []string{},
+		"sys.requests":          []string{},
+		"sys.links":             []map[string]any{},
+		"sys.currency":          float64(0),
+		"sys.transactions":      []any{},
+		"sys.items":             []any{},
+		"sys.badges":            []string{},
+		"sys.purchases":         []any{},
+		"sys.id":                uuid.New().String(),
+		"sys.passv":             1,
+		"sys.tos_accepted":      true,
+		"sys.email_verified":    true,
+		"created":               time.Now().UnixMilli(),
+		"sys.index":             nextUserIndex(),
+	}
+
+	usersMutex.Lock()
+	users = append(users, newUser)
+	usersMutex.Unlock()
+
+	newId := newUser.GetId()
+	idToUserMutex.Lock()
+	usernameToId[name] = newId
+	idToUser[newId] = newUser
+	if k := newUser.GetKey(); k != "" {
+		keyToId[k] = newId
+	}
+	if email := newUser.GetEmail(); email != "" {
+		emailToId[email] = newId
+	}
+	idToUserMutex.Unlock()
+	saveUser(newId)
+
+	log.Printf("[init] Created built-in system account %q", username)
 }

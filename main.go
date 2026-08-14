@@ -73,6 +73,9 @@ func main() {
 	// Load initial data
 	loadBannedWords()
 	loadUsers()
+	// Ensure the built-in system accounts (e.g. "rotur" mint) exist before
+	// any handler runs; sign-in rewards, gifts and escrow depend on them.
+	ensureSystemAccounts()
 	loadGroupData()
 	loadFollowers()
 	loadPosts()

@@ -1614,7 +1614,19 @@ func claimDaily(c *gin.Context) {
 		if breakdown.SpecialReason != "" {
 			note = fmt.Sprintf("每日签到 +%d（含%s）", baseAmount, breakdown.SpecialReason)
 		}
-		PerformCreditTransfer("rotur", username, totalAmount, note)
+		if err := PerformCreditTransfer("rotur", username, totalAmount, note); err != nil {
+			// Roll the claim back so the user can retry today. Without this,
+			// the sign-in above is already persisted and they would be told
+			// "already claimed" tomorrow despite never receiving any credits.
+			log.Printf("Daily claim credit transfer failed for %s: %v", username, err)
+			claimsData = loadDailyClaims()
+			delete(claimsData, username)
+			saveDailyClaims(claimsData)
+			c.JSON(500, gin.H{
+				"error": "Failed to grant daily reward",
+			})
+			return
+		}
 	}
 
 	saveUsers()
