@@ -21,6 +21,8 @@ var (
 	bannedWordsOnce   sync.Once
 	bannedWords       []string
 	bannedWordsErr    error
+	// bannedRules 是敏感词列表编译后的匹配规则，见 buildBannedRules。
+	bannedRules []*regexp.Regexp
 )
 
 func loadBannedWordsLocal() ([]string, error) {
@@ -53,6 +55,8 @@ func loadBannedWordsLocal() ([]string, error) {
 			}
 		}
 
+		bannedRules = buildBannedRules(bannedWords)
+
 		if len(bannedWords) == 0 && bannedWordsErr == nil {
 			bannedWordsErr = fmt.Errorf("no banned words loaded")
 		}
@@ -71,22 +75,88 @@ func ValidateUsername(username Username) (bool, string) {
 	if !usernameAllowedRe.MatchString(usernameLower) {
 		return false, "Username contains invalid characters"
 	}
-	words, err := loadBannedWordsLocal()
-	if err == nil {
-		for _, banned := range words {
-			u := strings.ReplaceAll(usernameLower, "1", "l")
-			u = strings.ReplaceAll(u, "3", "e")
-			u = strings.ReplaceAll(u, "5", "s")
-			u = strings.ReplaceAll(u, "7", "t")
-			u = strings.ReplaceAll(u, "9", "i")
-			u = strings.ReplaceAll(u, "0", "o")
-			u = strings.ReplaceAll(u, "8", "b")
-			if strings.Contains(u, strings.ToLower(banned)) {
-				return false, "Username contains a banned word"
-			}
+	// 敏感词仅在名单成功加载后才生效；加载失败（名单缺失等）时跳过检查，
+	// 避免因名单问题导致所有用户名无法注册。
+	if _, err := loadBannedWordsLocal(); err != nil {
+		return true, ""
+	}
+	u := normalizeLeet(usernameLower)
+	for _, rule := range bannedRules {
+		if rule.MatchString(u) {
+			return false, "Username contains a banned word"
 		}
 	}
 	return true, ""
+}
+
+// normalizeLeet 将常见 leetspeak 数字替换还原为字母，用于对抗绕过检测。
+// 例如 h3llo -> hello，a55 -> ass。
+func normalizeLeet(s string) string {
+	s = strings.ReplaceAll(s, "1", "l")
+	s = strings.ReplaceAll(s, "3", "e")
+	s = strings.ReplaceAll(s, "5", "s")
+	s = strings.ReplaceAll(s, "7", "t")
+	s = strings.ReplaceAll(s, "9", "i")
+	s = strings.ReplaceAll(s, "0", "o")
+	s = strings.ReplaceAll(s, "8", "b")
+	return s
+}
+
+// isAsciiAlphaWord 报告 s 是否由小写 ASCII 字母组成且非空。
+func isAsciiAlphaWord(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < 'a' || r > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+// wildcardToRegexp 将带 * 通配符的敏感词（如 "f*ck"、"*ass*"）转换为正则表达式，
+// * 表示匹配任意字符序列。
+func wildcardToRegexp(pattern string) string {
+	var b strings.Builder
+	for _, r := range pattern {
+		if r == '*' {
+			b.WriteString(".*")
+		} else {
+			b.WriteString(regexp.QuoteMeta(string(r)))
+		}
+	}
+	return b.String()
+}
+
+// buildBannedRules 将敏感词列表编译为匹配规则，避免子串匹配误伤正常用户名。
+//
+// 匹配策略：
+//   - 含通配符 * 的词（如 "f*ck"、"*ass*"）按通配符匹配，可在任意位置命中；
+//   - 纯 ASCII 字母词按整词匹配（词的前后必须是分隔符或边界），
+//     因此 "class" 不会被 "ass" 拦截；
+//   - 其余情况（含数字、符号或非 ASCII 字符）退化为子串匹配。
+func buildBannedRules(words []string) []*regexp.Regexp {
+	rules := make([]*regexp.Regexp, 0, len(words))
+	for _, word := range words {
+		w := strings.ToLower(strings.TrimSpace(word))
+		if w == "" {
+			continue
+		}
+		var pat string
+		switch {
+		case strings.Contains(w, "*"):
+			pat = wildcardToRegexp(w)
+		case isAsciiAlphaWord(w):
+			pat = "(?:^|[^a-z0-9])" + regexp.QuoteMeta(w) + "(?:[^a-z0-9]|$)"
+		default:
+			pat = regexp.QuoteMeta(w)
+		}
+		if re, err := regexp.Compile(pat); err == nil {
+			rules = append(rules, re)
+		}
+	}
+	return rules
 }
 
 func ValidatePassword(password string) (bool, string) {

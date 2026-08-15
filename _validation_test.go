@@ -174,3 +174,58 @@ func TestIsIpInBannedList_Empty(t *testing.T) {
 		t.Error("Should not match when BANNED_IPS is not set")
 	}
 }
+
+// matchBannedList 是测试辅助：将敏感词列表编译成规则后判断用户名是否命中。
+func matchBannedList(username string, words []string) bool {
+	rules := buildBannedRules(words)
+	for _, rule := range rules {
+		if rule.MatchString(normalizeLeet(username)) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBannedWords_NoFalsePositives(t *testing.T) {
+	words := []string{"ass", "sex", "god", "fuck", "bitch"}
+	notHit := []string{
+		"class", "pass", "grass", "passion", "massage",
+		"assistant", "assemble", "assurance",
+		"sussex", "sextant", "sextoy",
+		"dogood", "godzilla", "goddess",
+	}
+	for _, s := range notHit {
+		if matchBannedList(s, words) {
+			t.Errorf("username %q should NOT be flagged as banned", s)
+		}
+	}
+}
+
+func TestBannedWords_WholeWordAndBoundary(t *testing.T) {
+	words := []string{"ass", "sex", "god", "fuck", "bitch"}
+	hit := []string{
+		"ass", "my-ass", "ass_ho",
+		"sex", "my.sex", "sex-zone",
+		"god", "a-god",
+		"fuck", "f-u-c-k",
+		"b1tch", // leetspeak 还原后整词命中
+	}
+	for _, s := range hit {
+		if !matchBannedList(s, words) {
+			t.Errorf("username %q SHOULD be flagged as banned", s)
+		}
+	}
+}
+
+func TestBannedWords_Wildcard(t *testing.T) {
+	words := []string{"f*ck", "*damn*"}
+	hit := []string{
+		"fuck", "fuuck", "f--ck",
+		"damn", "damnation", "you_damn_fool",
+	}
+	for _, s := range hit {
+		if !matchBannedList(s, words) {
+			t.Errorf("username %q SHOULD be flagged as banned by wildcard rule", s)
+		}
+	}
+}
