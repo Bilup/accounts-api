@@ -514,6 +514,7 @@ func tierMax() sub_benefits {
 	b := tierPro()
 	b.Max_Keys = 500
 	b.FileSystem_Size = 10_000_000_000
+	b.Daily_Credit_Multipler = 4
 	return b
 }
 

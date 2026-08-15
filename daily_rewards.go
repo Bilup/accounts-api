@@ -10,15 +10,14 @@ import (
 // Regular weekday login:
 //   Mon +1, Tue +1, Wed +1, Thu +1, Fri +2, Sat +2, Sun +2
 //
-// Special date bonuses (added on top of the weekday base, highest wins per
-// category for a single matching day):
+// Special date bonuses are fixed amounts (not stacked on top of the weekday
+// base). When a special day is matched the total reward is the special value
+// itself; on ordinary days the total is the weekday base. Multiple categories
+// matching the same day add together (e.g. Lantern Festival + special week):
 //   1. (Solar) Oct 1, Jan 1; (Lunar) Chinese New Year's Eve, Spring Festival -> +20
 //   2. (Solar) May 1, Dec 25; (Lunar) Lantern Festival (正月十五) -> +10
 //   3. Qingming (solar), Dragon Boat (lunar), Mid-Autumn (lunar) -> +5
 //   4. Special week (solar): Mar 3 +20, Mar 4 +5, Mar 5 +5, Mar 6 +5, Mar 7 +5
-//
-// All matching bonuses are added together so a user always gets at least the
-// weekday base and may receive stacked event bonuses on top.
 //
 // Subscription tier multiplier `Daily_Credit_Multipler` (Free=1, Plus=2,
 // Pro=3, Max=4) is applied to the total in the handler that performs the
@@ -82,6 +81,7 @@ type specialDate struct {
 	bonus int
 }
 
+// weekdayBase: Mon-Thu +1, Fri-Sun +2.
 var weekdayBase = map[time.Weekday]int{
 	time.Monday:    1,
 	time.Tuesday:   1,
@@ -117,7 +117,7 @@ var qingmingDates = map[int]specialDate{
 }
 
 // specialWeekDates captures the Mar 3-7 special week rules. Each entry is
-// (month, day, bonus) and the values stack on top of the weekday base.
+// (month, day, bonus); the value replaces the weekday base on that day.
 var specialWeekDates = []specialDate{
 	{time.March, 3, 20},
 	{time.March, 4, 5},
@@ -198,7 +198,14 @@ func CalculateDailyReward(now time.Time) DailyRewardBreakdown {
 		}
 	}
 
-	b.Total = b.Base + b.SpecialSolar + b.SpecialLunar + b.SpecialWeek + b.Qingming
+	// Special days pay a fixed amount instead of the weekday base. Multiple
+	// special categories matching the same day are added together.
+	special := b.SpecialSolar + b.SpecialLunar + b.SpecialWeek + b.Qingming
+	if special > 0 {
+		b.Total = special
+	} else {
+		b.Total = b.Base
+	}
 	if reasons := describeBreakdown(b); reasons != "" {
 		b.SpecialReason = reasons
 	}
