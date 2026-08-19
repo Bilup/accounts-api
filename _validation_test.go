@@ -176,10 +176,15 @@ func TestIsIpInBannedList_Empty(t *testing.T) {
 }
 
 // matchBannedList 是测试辅助：将敏感词列表编译成规则后判断用户名是否命中。
+// 包含白名单检查，与 ValidateUsername 保持一致。
 func matchBannedList(username string, words []string) bool {
+	u := normalizeLeet(username)
+	if _, ok := loadWhitelist()[u]; ok {
+		return false
+	}
 	rules := buildBannedRules(words)
 	for _, rule := range rules {
-		if rule.MatchString(normalizeLeet(username)) {
+		if rule.MatchString(u) {
 			return true
 		}
 	}
@@ -208,7 +213,7 @@ func TestBannedWords_WholeWordAndBoundary(t *testing.T) {
 		"sex", "my.sex", "sex-zone",
 		"god", "a-god",
 		"fuck", "f-u-c-k",
-		"b1tch", // leetspeak 还原后整词命中
+			"b1tch", // leetspeak 还原：1→i，b1tch→bitch，整词命中
 	}
 	for _, s := range hit {
 		if !matchBannedList(s, words) {
@@ -226,6 +231,106 @@ func TestBannedWords_Wildcard(t *testing.T) {
 	for _, s := range hit {
 		if !matchBannedList(s, words) {
 			t.Errorf("username %q SHOULD be flagged as banned by wildcard rule", s)
+		}
+	}
+}
+
+func TestBannedWords_LeetNormalization(t *testing.T) {
+	words := []string{"shit", "fuck", "ass", "bitch"}
+	hit := []string{
+		"sh1t", "sh!t", "sh1tman",
+		"a55", "a$$", "@ss", "a5s",
+		"b1tch", "b!tch",
+	}
+	for _, s := range hit {
+		if !matchBannedList(s, words) {
+			t.Errorf("username %q SHOULD be flagged as banned (leetspeak bypass)", s)
+		}
+	}
+}
+
+func TestBannedWords_NoFalsePositives_Digits(t *testing.T) {
+	words := []string{"sh1t", "a55"}
+	notHit := []string{
+		"push1to", "mish1t", "sh1top",
+		"fresh1time", "wash1towel",
+		"ca55", "cla55", "pa55ion",
+	}
+	for _, s := range notHit {
+		if matchBannedList(s, words) {
+			t.Errorf("username %q should NOT be flagged (substring of word with digit)", s)
+		}
+	}
+}
+
+func TestBannedWords_Whitelist(t *testing.T) {
+	// 白名单中的词不应被违禁词误伤
+	words := []string{"ass", "sex", "god", "fuck", "bitch"}
+	notHit := []string{
+		"class", "pass", "grass", "passion", "massage",
+		"assistant", "assemble", "assurance",
+		"sussex", "sextant", "sextoy",
+		"dogood", "godzilla", "goddess",
+	}
+	for _, s := range notHit {
+		if matchBannedList(s, words) {
+			t.Errorf("username %q should NOT be flagged (whitelist)", s)
+		}
+	}
+}
+
+func TestBannedWords_ShortWord(t *testing.T) {
+	words := []string{"po", "fu"}
+	hit := []string{
+		"po", "fu",
+		"po_user", "fu_bar",
+		"my_po", "my_fu",
+	}
+	notHit := []string{
+		"spot", "future", "popular", "refund",
+		"spoon", "confuse",
+	}
+	for _, s := range hit {
+		if !matchBannedList(s, words) {
+			t.Errorf("username %q SHOULD be flagged as banned (short word)", s)
+		}
+	}
+	for _, s := range notHit {
+		if matchBannedList(s, words) {
+			t.Errorf("username %q should NOT be flagged (short word false positive)", s)
+		}
+	}
+}
+
+func TestBannedWords_MinLength(t *testing.T) {
+	words := []string{"a", "i", "u"}
+	notHit := []string{"a", "i", "u", "alpha", "india", "user"}
+	for _, s := range notHit {
+		if matchBannedList(s, words) {
+			t.Errorf("username %q should NOT be flagged (len<2 banned word skipped)", s)
+		}
+	}
+}
+
+func TestBannedWords_LeetInBannedWord(t *testing.T) {
+	words := []string{"sh1t", "a55", "f*ck"}
+	hit := []string{
+		"sh1t", "my-sh1t", "sh1t_man",
+		"a55", "my.a55",
+		"fuck", "f-u-c-k",
+	}
+	notHit := []string{
+		"push1to", "mish1t", "sh1top",
+		"class", "grass", "pass",
+	}
+	for _, s := range hit {
+		if !matchBannedList(s, words) {
+			t.Errorf("username %q SHOULD be flagged as banned", s)
+		}
+	}
+	for _, s := range notHit {
+		if matchBannedList(s, words) {
+			t.Errorf("username %q should NOT be flagged (false positive)", s)
 		}
 	}
 }

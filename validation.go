@@ -25,6 +25,76 @@ var (
 	bannedRules []*regexp.Regexp
 )
 
+var (
+	whitelistWords     map[string]struct{}
+	whitelistWordsOnce sync.Once
+)
+
+func loadWhitelist() map[string]struct{} {
+	whitelistWordsOnce.Do(func() {
+		whitelistWords = make(map[string]struct{})
+		// 内置硬编码白名单：已知的误伤词（常见英文单词恰好包含违禁词子串）
+		builtin := []string{
+			"class", "pass", "grass", "passion", "massage",
+			"assistant", "assemble", "assurance",
+			"sussex", "sextant", "sextoy",
+			"dogood", "godzilla", "goddess",
+		}
+		for _, w := range builtin {
+			whitelistWords[w] = struct{}{}
+		}
+		// 从文件加载额外白名单
+		if data, err := os.ReadFile("./whitelist_words.json"); err == nil {
+			var words []string
+			if json.Unmarshal(data, &words) == nil {
+				for _, w := range words {
+					w = strings.ToLower(strings.TrimSpace(w))
+					if w != "" {
+						whitelistWords[w] = struct{}{}
+					}
+				}
+			}
+		}
+		// 从环境变量加载（逗号分隔）
+		if env := os.Getenv("WHITELIST_WORDS"); env != "" {
+			for _, w := range strings.Split(env, ",") {
+				w = strings.ToLower(strings.TrimSpace(w))
+				if w != "" {
+					whitelistWords[w] = struct{}{}
+				}
+			}
+		}
+	})
+	return whitelistWords
+}
+
+// minBannedWordLen 是最小违禁词长度，短于此值的词不生成匹配规则。
+const minBannedWordLen = 2
+
+// isAsciiAlphaNumWithSymbols 报告 s 是否仅由 ASCII 字母、数字和常见符号组成。
+// 用于判断含数字/符号的违禁词是否可尝试 leet 还原后做整词匹配。
+func isAsciiAlphaNumWithSymbols(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && !strings.ContainsRune("!@#$%^&*+-=._", r) {
+			return false
+		}
+	}
+	return true
+}
+
+// buildWordBoundaryPattern 构建整词边界正则。
+// strict=true 时要求前后都必须有显式分隔符（不允许仅靠行首/行尾），
+// 用于降低短词误伤风险。
+func buildWordBoundaryPattern(word string, strict bool) string {
+	if strict {
+		return "[^a-z0-9]" + regexp.QuoteMeta(word) + "[^a-z0-9]"
+	}
+	return "(?:^|[^a-z0-9])" + regexp.QuoteMeta(word) + "(?:[^a-z0-9]|$)"
+}
+
 func loadBannedWordsLocal() ([]string, error) {
 	bannedWordsOnce.Do(func() {
 		file, err := os.Open("./banned_words.json")
@@ -81,6 +151,13 @@ func ValidateUsername(username Username) (bool, string) {
 		return true, ""
 	}
 	u := normalizeLeet(usernameLower)
+
+	// 白名单检查：若用户名（leetspeak 还原后）命中白名单，直接放行，
+	// 避免常见英文单词被违禁词子串误伤。
+	if _, ok := loadWhitelist()[u]; ok {
+		return true, ""
+	}
+
 	for _, rule := range bannedRules {
 		if rule.MatchString(u) {
 			return false, "Username contains a banned word"
@@ -89,16 +166,27 @@ func ValidateUsername(username Username) (bool, string) {
 	return true, ""
 }
 
-// normalizeLeet 将常见 leetspeak 数字替换还原为字母，用于对抗绕过检测。
-// 例如 h3llo -> hello，a55 -> ass。
+// leetReplacements 定义 leetspeak 字符到字母的映射表。
+// 注意：1 优先映射到 i（对抗 sh1t、b1tch 等绕过），
+// 而非原 l，因为违禁词以脏话为主，1→i 命中率更高。
+var leetReplacements = []struct{ from, to string }{
+	{"@", "a"}, {"4", "a"},
+	{"8", "b"},
+	{"3", "e"},
+	{"6", "g"},
+	{"!", "i"}, {"1", "i"},
+	{"0", "o"},
+	{"5", "s"}, {"$", "s"},
+	{"7", "t"}, {"+", "t"},
+	{"2", "z"},
+}
+
+// normalizeLeet 将常见 leetspeak 字符替换还原为字母，用于对抗绕过检测。
+// 例如 h3llo -> hello，a55 -> ass，sh!t -> shit。
 func normalizeLeet(s string) string {
-	s = strings.ReplaceAll(s, "1", "l")
-	s = strings.ReplaceAll(s, "3", "e")
-	s = strings.ReplaceAll(s, "5", "s")
-	s = strings.ReplaceAll(s, "7", "t")
-	s = strings.ReplaceAll(s, "9", "i")
-	s = strings.ReplaceAll(s, "0", "o")
-	s = strings.ReplaceAll(s, "8", "b")
+	for _, r := range leetReplacements {
+		s = strings.ReplaceAll(s, r.from, r.to)
+	}
 	return s
 }
 
@@ -132,24 +220,37 @@ func wildcardToRegexp(pattern string) string {
 // buildBannedRules 将敏感词列表编译为匹配规则，避免子串匹配误伤正常用户名。
 //
 // 匹配策略：
-//   - 含通配符 * 的词（如 "f*ck"、"*ass*"）按通配符匹配，可在任意位置命中；
+//   - 含通配符 * 的词（如 "f*ck"、"*damn*"）按通配符匹配，可在任意位置命中；
 //   - 纯 ASCII 字母词按整词匹配（词的前后必须是分隔符或边界），
 //     因此 "class" 不会被 "ass" 拦截；
-//   - 其余情况（含数字、符号或非 ASCII 字符）退化为子串匹配。
+//   - 含数字/符号但无异域字符的词（如 "sh1t"、"a$$"），先尝试 leet 还原，
+//     还原后为纯字母则按整词匹配，否则按带边界的子串匹配；
+//   - 其余情况（含非 ASCII 字符）退化为子串匹配。
+//   - 长度 < minBannedWordLen 的词不生成规则。
 func buildBannedRules(words []string) []*regexp.Regexp {
 	rules := make([]*regexp.Regexp, 0, len(words))
 	for _, word := range words {
 		w := strings.ToLower(strings.TrimSpace(word))
-		if w == "" {
+		if w == "" || len(w) < minBannedWordLen {
 			continue
 		}
 		var pat string
+		short := len(w) <= 2
 		switch {
 		case strings.Contains(w, "*"):
 			pat = wildcardToRegexp(w)
 		case isAsciiAlphaWord(w):
-			pat = "(?:^|[^a-z0-9])" + regexp.QuoteMeta(w) + "(?:[^a-z0-9]|$)"
+			pat = buildWordBoundaryPattern(w, short)
+		case isAsciiAlphaNumWithSymbols(w):
+			// 含数字/符号但无异域字符：尝试 leet 还原后按整词匹配
+			normalized := normalizeLeet(w)
+			if isAsciiAlphaWord(normalized) {
+				pat = buildWordBoundaryPattern(normalized, len(normalized) <= 2)
+			} else {
+				pat = buildWordBoundaryPattern(w, short)
+			}
 		default:
+			// 含非 ASCII 字符，退化为子串匹配（兜底）
 			pat = regexp.QuoteMeta(w)
 		}
 		if re, err := regexp.Compile(pat); err == nil {
